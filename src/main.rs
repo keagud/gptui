@@ -1,10 +1,13 @@
+#![allow(dead_code)]
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow;
 use anyhow::format_err;
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Body, Client, Method};
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 
 use serde_json::{self, json};
 
@@ -12,6 +15,8 @@ const OPENAI_API_KEY: &'static str = env!("OPENAI_API_KEY");
 const OPENAI_API_URL: &'static str = "https://api.openai.com/v1";
 
 const ALONZO_ID: &'static str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
+
+const POLL_INTERVAL_SEC: usize = 2;
 
 macro_rules! openai_url {
     ($s:literal) => {
@@ -27,11 +32,7 @@ macro_rules! openai_url {
         {
             let _s = format!($fmt, $($v),* );
             format!("https://api.openai.com/v1{}", _s)
-
-
         }
-
-
 
     };
 }
@@ -140,6 +141,8 @@ impl Message {
             .as_object()
             .ok_or(format_err!("Invalid json object"))?;
 
+        dbg!(vals_map);
+
         let get_val = |key: &str| -> anyhow::Result<&serde_json::Value> {
             let val = vals_map
                 .get(key.into())
@@ -206,11 +209,19 @@ impl Message {
     }
 }
 
-struct Thread {
+#[derive(Serialize, Deserialize, Debug)]
+struct Run {
     id: String,
+    created_at: usize,
+    status: String,
+}
+
+struct Thread {
+    pub id: String,
     pub messages: Vec<Message>,
     pub assistant: Assistant,
     client: Client,
+    poll_interval: usize,
 }
 
 impl Thread {
@@ -221,9 +232,11 @@ impl Thread {
             assistant,
             messages: Vec::new(),
             client,
+            poll_interval: POLL_INTERVAL_SEC,
         })
     }
 
+    /// Make a new thread associated with the assistant
     pub async fn create(assistant: Assistant) -> anyhow::Result<Self> {
         let client = init_client()?;
         let id = create_thread(&client).await?;
@@ -233,9 +246,11 @@ impl Thread {
             assistant,
             client,
             messages: Vec::new(),
+            poll_interval: POLL_INTERVAL_SEC,
         })
     }
 
+    /// Get the state of this thread from the API, and update this struct's state to match.
     pub async fn fetch(&mut self) -> anyhow::Result<&Vec<Message>> {
         let reply_json = self
             .client
@@ -259,74 +274,92 @@ impl Thread {
         self.messages = messages;
         Ok(&self.messages)
     }
+
+    /// Submit the current state of the thread for a run.
+    /// Return the Run object
+    async fn submit(&self) -> anyhow::Result<Run> {
+        let request_json_str = json!({"assistant_id" : &self.assistant.id }).to_string();
+
+        let reply_json_str = self
+            .client
+            .post(openai_url!("/threads{}/runs", &self.id))
+            .body(request_json_str)
+            .send()
+            .await?
+            .text()
+            .await?;
+
+        let run: Run = serde_json::from_str(&reply_json_str)?;
+
+        Ok(run)
+    }
+
+    /// Send the message to this thread, and wait asynchronously
+    /// for it to finish.
+    /// Return a reference to the completed message.
+    pub async fn await_reply(&mut self, message: &str) -> anyhow::Result<&Message> {
+        self.add_message(message).await?;
+        let run = self.submit().await?;
+
+        let sleep_duration = Duration::from_secs(self.poll_interval as u64);
+
+        let check_url = openai_url!("/threads/{}/runs/{}", self.id, run.id).to_owned();
+
+        loop {
+            let reply = self.client.get(&check_url).send().await?.text().await?;
+            let run_update: Run = serde_json::from_str(&reply)?;
+
+            match run_update.status.to_ascii_lowercase().trim() {
+                "completed" => break,
+                "queued" => (),
+                "in_progress" => (),
+                _ => return Err(format_err!("Run status is {}", run_update.status)),
+            }
+
+            sleep(sleep_duration).await;
+        }
+
+        Ok(self
+            .fetch()
+            .await?
+            .last()
+            .expect("Thread should not be empty"))
+    }
+
+    /// Add a message to the thread without running or submitting.
+    async fn add_message(&self, message: &str) -> anyhow::Result<Message> {
+        let request_json_str = json!({"role" : "user", "content": message}).to_string();
+
+        let reply_json = self
+            .client
+            .post(openai_url!("/threads/{}/messages", self.id))
+            .body(request_json_str)
+            .send()
+            .await?
+            .text()
+            .await?;
+
+        let new_msg = Message::from_json_text(&reply_json)?;
+        Ok(new_msg)
+    }
 }
 
 struct Session {
-    client: Client,
     threads: HashMap<String, Thread>,
 }
 
 impl Session {
     pub fn init() -> anyhow::Result<Self> {
-        let client = init_client()?;
         let threads = HashMap::new();
 
-        Ok(Self { client, threads })
+        Ok(Self { threads })
     }
 
-    pub async fn create_thread(&mut self, assistant: Assistant) -> anyhow::Result<String> {
-        let req = self.client.post(openai_url!("/threads"));
-
-        let response = req.send().await?.text().await?;
-
-        let json_reply: serde_json::Value = serde_json::from_str(&response.as_str())?;
-
-        let thread_id: String = json_reply
-            .as_object()
-            .ok_or(format_err!(
-                "Unable to parse reply to thread creation request"
-            ))?
-            .get("id".into())
-            .and_then(|val| val.as_str())
-            .ok_or(format_err!("Reply was missing thread id"))?
-            .into();
-
-        let new_thread = Thread::new(&thread_id, assistant)?;
-        self.threads.insert(thread_id.clone(), new_thread);
-
-        Ok(thread_id)
-    }
-
-    pub async fn send_message(
-        &mut self,
-        thread_id: &str,
-        message_text: &str,
-    ) -> anyhow::Result<&Message> {
-        let thread = self
-            .threads
-            .get_mut(thread_id)
-            .ok_or(format_err!("Not a known thread id: {thread_id}"))?;
-
-        let message_json = json!( {
-                "role" : "user",
-                "content" : message_text
-        });
-
-        let req = self
-            .client
-            .post(openai_url!("/threads/{}/messages", thread_id))
-            .body(message_json.to_string());
-
-        let json_text = req.send().await?.text().await?;
-
-        let new_message = Message::from_json_text(&json_text)?;
-
-        thread.messages.push(new_message);
-
-        Ok(thread
-            .messages
-            .last()
-            .expect("Message was added successfuly"))
+    pub async fn create_thread(&mut self, assistant: Assistant) -> anyhow::Result<&mut Thread> {
+        let new_thread = Thread::create(assistant).await?;
+        let new_thread_id = new_thread.id.to_owned();
+        self.threads.insert(new_thread_id.clone(), new_thread);
+        Ok(self.threads.get_mut(&new_thread_id).unwrap())
     }
 }
 
@@ -339,12 +372,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut session = Session::init()?;
-    let thread_id = session.create_thread(asst).await?;
-    let new_msg = session
-        .send_message(&thread_id, "How do I exit vim?")
-        .await?;
 
-    println!("{:?}", new_msg);
+    let mut thread = session.create_thread(asst).await?;
+    let reply = thread.await_reply("How to I exit vim?").await?;
+
+    println!("{reply:?}");
 
     Ok(())
 }
