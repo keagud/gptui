@@ -1,13 +1,17 @@
+use anyhow::format_err;
+
+use directories::BaseDirs;
+use gpt::{self, Assistant, Session, Thread};
+
+use std::fs;
 use std::io::{self, Write};
-
+use std::path::PathBuf;
 use std::time::Duration;
-
 use tokio::time::sleep;
-
-use gpt::{self, Assistant, Session};
 
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
+const DATA_DIR_NAME: &str = "gpt_rs";
 macro_rules! spinner {
     ($b:block) => {{
         let mut _spinner =
@@ -16,6 +20,18 @@ macro_rules! spinner {
         _spinner.stop_with_newline();
         _value
     }};
+}
+
+fn save_thread(thread: &Thread) -> anyhow::Result<()> {
+    let _json = serde_json::json!({
+
+
+
+        "messages" : thread.messages
+
+    });
+
+    Ok(())
 }
 
 pub enum Assistants {
@@ -51,6 +67,20 @@ impl ChatSession {
         let session = Session::init()?;
 
         Ok(Self { session, assistant })
+    }
+
+    fn save_dir() -> anyhow::Result<PathBuf> {
+        let data_dir = BaseDirs::new()
+            .ok_or(format_err!("Unable to get user data directory"))?
+            .data_dir()
+            .to_path_buf()
+            .join(DATA_DIR_NAME);
+
+        if !data_dir.try_exists()? {
+            fs::create_dir_all(data_dir.as_path())?;
+        }
+
+        Ok(data_dir)
     }
 
     pub async fn run_shell(&mut self) -> anyhow::Result<()> {

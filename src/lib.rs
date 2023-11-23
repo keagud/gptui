@@ -225,6 +225,13 @@ pub struct Run {
     status: String,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct ThreadDump {
+    id: String,
+    messages: Vec<Message>,
+    assistant: Assistant,
+}
+
 pub struct Thread {
     pub id: String,
     pub messages: Vec<Message>,
@@ -243,6 +250,38 @@ impl Thread {
             client,
             poll_interval: POLL_INTERVAL_SEC,
         })
+    }
+
+    pub fn load_from_dump(dump: ThreadDump) -> anyhow::Result<Self> {
+        Self::load(&dump.id, dump.assistant, dump.messages)
+    }
+
+    pub fn load(id: &str, assistant: Assistant, messages: Vec<Message>) -> anyhow::Result<Self> {
+        let client = init_client()?;
+
+        let new_thread = Self {
+            id: id.into(),
+            messages,
+            assistant,
+            client,
+            poll_interval: POLL_INTERVAL_SEC,
+        };
+
+        Ok(new_thread)
+    }
+
+    pub fn dump_json(&self) -> serde_json::Value {
+        json!({
+            "id" : self.id,
+            "assistant" : self.assistant,
+            "messages" : self.messages
+        })
+    }
+
+    pub fn load_json_string(json_str: &str) -> anyhow::Result<Self> {
+        let dump_vals: ThreadDump = serde_json::from_str(json_str)?;
+
+        Self::load(&dump_vals.id, dump_vals.assistant, dump_vals.messages)
     }
 
     /// Make a new thread associated with the assistant
@@ -371,6 +410,30 @@ pub struct Session {
 impl Session {
     pub fn init() -> anyhow::Result<Self> {
         let threads = HashMap::new();
+
+        Ok(Self { threads })
+    }
+
+    pub fn threads(&self) -> Vec<&Thread> {
+        self.threads.values().collect()
+    }
+
+    pub fn dump_as_json(&self) -> Vec<serde_json::Value> {
+        self.threads()
+            .iter()
+            .map(|t| t.dump_json())
+            .collect::<Vec<serde_json::Value>>()
+    }
+
+    pub fn load_from_json(json_str: &str) -> anyhow::Result<Self> {
+        let threads_vec: Vec<ThreadDump> = serde_json::from_str(json_str)?;
+
+        let threads: HashMap<String, Thread> = threads_vec
+            .into_iter()
+            .map(|t| Thread::load_from_dump(t).map(|t| (t.id.clone(), t)))
+            .collect::<anyhow::Result<Vec<(String, Thread)>>>()?
+            .into_iter()
+            .collect();
 
         Ok(Self { threads })
     }
