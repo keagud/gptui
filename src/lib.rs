@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::format_err;
@@ -17,6 +19,7 @@ const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const POLL_INTERVAL_SEC: usize = 2;
 
+const DATA_DIR_NAME: &str = "gpt_rs";
 macro_rules! openai_url {
     ($s:literal) => {
         concat!("https://api.openai.com/v1", $s)
@@ -39,6 +42,14 @@ macro_rules! openai_url {
 macro_rules! val_or_err {
     ($s:expr) => {{
         $s.ok_or_else(|| anyhow::format_err!("Can't convert to type"))
+    }};
+}
+
+macro_rules! data_dir {
+    () => {{
+        directories::BaseDirs::new()
+            .ok_or(anyhow::format_err!("Unable to access system directories"))
+            .map(|d| std::path::PathBuf::from(d.data_dir()).join(DATA_DIR_NAME))
     }};
 }
 
@@ -404,14 +415,32 @@ impl Thread {
 }
 
 pub struct Session {
+    data_dir: PathBuf,
     threads: HashMap<String, Thread>,
 }
 
 impl Session {
-    pub fn init() -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let threads = HashMap::new();
 
-        Ok(Self { threads })
+        let data_dir = data_dir!()?;
+
+        Ok(Self { threads, data_dir })
+    }
+
+    pub fn init() -> anyhow::Result<Self> {
+        let data_dir = data_dir!()?;
+
+        let threads_file = data_dir.join("threads.json");
+
+        let threads_dump: Vec<ThreadDump> = if threads_file.try_exists()? {
+            let fp = fs::File::open(threads_file)?;
+            serde_json::from_reader(fp)?
+        } else {
+            Vec::new()
+        };
+
+        todo!()
     }
 
     pub fn threads(&self) -> Vec<&Thread> {
@@ -435,7 +464,10 @@ impl Session {
             .into_iter()
             .collect();
 
-        Ok(Self { threads })
+        Ok(Self {
+            threads,
+            data_dir: data_dir!()?,
+        })
     }
 
     pub async fn create_thread(&mut self, assistant: Assistant) -> anyhow::Result<&mut Thread> {

@@ -3,7 +3,7 @@ use anyhow::format_err;
 use directories::BaseDirs;
 use gpt::{self, Assistant, Session, Thread};
 
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -12,6 +12,14 @@ use tokio::time::sleep;
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const DATA_DIR_NAME: &str = "gpt_rs";
+
+macro_rules! data_dir {
+    () => {{
+        directories::BaseDirs::new()
+            .ok_or(anyhow::format_err!("Unable to access system directories"))
+            .map(|d| std::path::PathBuf::from(d.data_dir()))
+    }};
+}
 macro_rules! spinner {
     ($b:block) => {{
         let mut _spinner =
@@ -23,13 +31,13 @@ macro_rules! spinner {
 }
 
 fn save_thread(thread: &Thread) -> anyhow::Result<()> {
-    let _json = serde_json::json!({
+    let threads_dir = data_dir!()?.join("threads");
+    let thread_filename = format!("threads/{}.json", thread.id);
+    fs::create_dir_all(&threads_dir)?;
 
+    let thread_file = fs::File::create(threads_dir.join(&thread_filename))?;
 
-
-        "messages" : thread.messages
-
-    });
+    serde_json::to_writer_pretty(thread_file, &thread.dump_json())?;
 
     Ok(())
 }
