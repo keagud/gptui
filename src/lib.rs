@@ -12,9 +12,6 @@ use tokio::time::sleep;
 
 use serde_json::{self, json};
 
-const OPENAI_API_KEY: &str = env!("OPENAI_API_KEY");
-const OPENAI_API_URL: &str = "https://api.openai.com/v1";
-
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const POLL_INTERVAL_SEC: usize = 2;
@@ -406,6 +403,7 @@ impl Thread {
             .body(request_json_str)
             .send()
             .await?
+            .error_for_status()?
             .text()
             .await?;
 
@@ -428,8 +426,12 @@ impl Session {
         Ok(Self { threads, data_dir })
     }
 
-    pub fn init() -> anyhow::Result<Self> {
+    pub fn load() -> anyhow::Result<Self> {
         let data_dir = data_dir!()?;
+
+        if !data_dir.try_exists()? {
+            fs::create_dir_all(data_dir.as_path())?;
+        }
 
         let threads_file = data_dir.join("threads.json");
 
@@ -440,36 +442,32 @@ impl Session {
             Vec::new()
         };
 
-        todo!()
-    }
-
-    pub fn threads(&self) -> Vec<&Thread> {
-        self.threads.values().collect()
-    }
-
-    pub fn dump_as_json(&self) -> Vec<serde_json::Value> {
-        self.threads()
-            .iter()
-            .map(|t| t.dump_json())
-            .collect::<Vec<serde_json::Value>>()
-    }
-
-    pub fn load_from_json(json_str: &str) -> anyhow::Result<Self> {
-        let threads_vec: Vec<ThreadDump> = serde_json::from_str(json_str)?;
-
-        let threads: HashMap<String, Thread> = threads_vec
+        let threads: HashMap<String, Thread> = threads_dump
             .into_iter()
             .map(|t| Thread::load_from_dump(t).map(|t| (t.id.clone(), t)))
             .collect::<anyhow::Result<Vec<(String, Thread)>>>()?
             .into_iter()
             .collect();
 
-        Ok(Self {
-            threads,
-            data_dir: data_dir!()?,
-        })
+        Ok(Self { threads, data_dir })
     }
 
+    pub fn threads(&self) -> Vec<&Thread> {
+        self.threads.values().collect()
+    }
+
+    fn save(&self) -> anyhow::Result<()> {
+        let json = self
+            .threads()
+            .iter()
+            .map(|t| t.dump_json())
+            .collect::<Vec<serde_json::Value>>();
+
+        let fp = fs::File::create(self.data_dir.join("threads.json"))?;
+        serde_json::to_writer_pretty(fp, &json)?;
+
+        Ok(())
+    }
     pub async fn create_thread(&mut self, assistant: Assistant) -> anyhow::Result<&mut Thread> {
         let new_thread = Thread::create(assistant).await?;
         let new_thread_id = new_thread.id.to_owned();

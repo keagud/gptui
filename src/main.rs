@@ -3,7 +3,7 @@ use anyhow::format_err;
 use directories::BaseDirs;
 use gpt::{self, Assistant, Session, Thread};
 
-use std::fs::{self, File};
+use std::fs::{self};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,7 +35,7 @@ fn save_thread(thread: &Thread) -> anyhow::Result<()> {
     let thread_filename = format!("threads/{}.json", thread.id);
     fs::create_dir_all(&threads_dir)?;
 
-    let thread_file = fs::File::create(threads_dir.join(&thread_filename))?;
+    let thread_file = fs::File::create(threads_dir.join(thread_filename))?;
 
     serde_json::to_writer_pretty(thread_file, &thread.dump_json())?;
 
@@ -72,7 +72,7 @@ struct ChatSession {
 
 impl ChatSession {
     pub async fn new(assistant: Assistant) -> anyhow::Result<Self> {
-        let session = Session::init()?;
+        let session = Session::load()?;
 
         Ok(Self { session, assistant })
     }
