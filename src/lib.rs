@@ -11,6 +11,7 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
+use rusqlite;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -18,8 +19,6 @@ use tokio::time::sleep;
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const POLL_INTERVAL_SEC: usize = 2;
-
-const DATA_DIR_NAME: &str = "gpt_rs";
 
 lazy_static! {
     static ref CODEBLOCK_PATTERN: Regex = RegexBuilder::new(r#"```(\w+)?(.*?)```"#)
@@ -53,11 +52,21 @@ macro_rules! val_or_err {
     }};
 }
 
+#[macro_export]
 macro_rules! data_dir {
     () => {{
         directories::BaseDirs::new()
             .ok_or(anyhow::format_err!("Unable to access system directories"))
-            .map(|d| std::path::PathBuf::from(d.data_dir()).join(DATA_DIR_NAME))
+            .map(|d| std::path::PathBuf::from(d.data_dir()).join("gpt_rs"))
+            .and_then(|p| {
+                match p.try_exists() {
+                    Ok(false) => std::fs::create_dir_all(&p).map(|_| p),
+
+                    Err(e) => Err(e),
+                    Ok(true) => Ok(p),
+                }
+                .map_err(|e| e.into())
+            })
     }};
 }
 
