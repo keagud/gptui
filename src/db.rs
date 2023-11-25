@@ -1,7 +1,7 @@
 use anyhow;
 use directories::BaseDirs;
-use gpt::data_dir;
 use rusqlite::{self, Connection};
+use crate::data_dir;
 
 mod schema {
     pub const SQL: &str = include_str!(concat!(env!("OUT_DIR"), "/schema.sql"));

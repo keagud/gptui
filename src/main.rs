@@ -5,7 +5,7 @@ use clap::{arg, command, value_parser, Command, Parser, Subcommand};
 use std::time::Duration;
 use tokio::time::sleep;
 
-mod db;
+pub use gpt::data_dir;
 
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 macro_rules! spinner {

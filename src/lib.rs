@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
 
+pub mod db;
+
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const POLL_INTERVAL_SEC: usize = 2;
@@ -524,6 +526,7 @@ impl Thread {
 pub struct Session {
     data_dir: PathBuf,
     threads: HashMap<String, Thread>,
+    db: rusqlite::Connection,
 }
 
 impl Drop for Session {
@@ -538,7 +541,13 @@ impl Session {
 
         let data_dir = data_dir!()?;
 
-        Ok(Self { threads, data_dir })
+        let db = db::init_db()?;
+
+        Ok(Self {
+            threads,
+            data_dir,
+            db,
+        })
     }
 
     pub fn load() -> anyhow::Result<Self> {
@@ -564,7 +573,13 @@ impl Session {
             .into_iter()
             .collect();
 
-        Ok(Self { threads, data_dir })
+        let db = db::init_db()?;
+
+        Ok(Self {
+            threads,
+            data_dir,
+            db,
+        })
     }
 
     pub fn threads(&self) -> Vec<&Thread> {
