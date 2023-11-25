@@ -1,22 +1,33 @@
 #![allow(dead_code)]
+
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::format_err;
+use lazy_static::lazy_static;
+use regex::{Regex, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
-
 use serde_json::{self, json};
+use tokio::time::sleep;
 
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 
 const POLL_INTERVAL_SEC: usize = 2;
 
 const DATA_DIR_NAME: &str = "gpt_rs";
+
+lazy_static! {
+    static ref CODEBLOCK_PATTERN: Regex = RegexBuilder::new(r#"```(\w+)?(.*?)```"#)
+        .dot_matches_new_line(true)
+        .build()
+        .expect("Premade regex should be ok");
+}
+
 macro_rules! openai_url {
     ($s:literal) => {
         concat!("https://api.openai.com/v1", $s)
@@ -100,7 +111,7 @@ pub struct Assistant {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, Eq, PartialEq)]
 pub enum Role {
     User,
     Assistant,
@@ -128,7 +139,25 @@ impl<'de> Deserialize<'de> for Role {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+pub struct CodeBlock {
+    pub language: Option<String>,
+    pub content: String,
+}
+
+impl Display for CodeBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let language: &str = if let Some(ref s) = self.language {
+            s.as_str()
+        } else {
+            ""
+        };
+
+        write!(f, "```{}\n{}\n```", language, self.content)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Message {
     id: String,
     created_at: usize,
@@ -224,6 +253,52 @@ impl Message {
     pub fn timestamp(&self) -> usize {
         self.created_at
     }
+
+    pub fn annotate_blocks(&mut self, counter_start: usize) -> Vec<CodeBlock> {
+        let mut blocks = Vec::new();
+        let mut counter = counter_start;
+
+        let modified_text =
+            CODEBLOCK_PATTERN.replace_all(&self.text_content, |cap: &regex::Captures<'_>| {
+                let block = CodeBlock {
+                    language: cap.get(1).map(|s| s.as_str().to_owned()),
+                    content: cap
+                        .get(2)
+                        .map(|s| s.as_str().to_owned())
+                        .unwrap_or_default(),
+                };
+
+                let lang = if let Some(ref s) = block.language {
+                    s
+                } else {
+                    ""
+                };
+
+                let annotated = format!("```{}\n{}\n```({})\n", lang, &block.content, counter);
+                counter += 1;
+
+                blocks.push(block);
+
+                annotated
+            });
+
+        self.text_content = modified_text.to_string();
+        blocks
+    }
+
+    pub fn code_blocks(&self) -> Vec<CodeBlock> {
+        CODEBLOCK_PATTERN
+            .captures_iter(&self.text_content)
+            .map(|c| CodeBlock {
+                language: c.get(1).map(|s| s.as_str().to_owned()),
+                content: c
+                    .get(2)
+                    .expect("Code block cannot be empty")
+                    .as_str()
+                    .to_owned(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -245,7 +320,7 @@ pub struct Thread {
     pub messages: Vec<Message>,
     pub assistant: Assistant,
     client: Client,
-    poll_interval: usize,
+    code_blocks: Vec<CodeBlock>,
 }
 
 impl Thread {
@@ -256,24 +331,50 @@ impl Thread {
             assistant,
             messages: Vec::new(),
             client,
-            poll_interval: POLL_INTERVAL_SEC,
+            code_blocks: Vec::new(),
         })
+    }
+
+    pub fn first_message(&self) -> &Message {
+        self.messages
+            .iter()
+            .min_by_key(|m| m.timestamp())
+            .expect("Thread has at least one message")
+    }
+
+    /// Sort a vec of messages by timestamp
+    /// And index their code blocks.
+    /// Mutates in place.
+    fn prepare_messages(&mut self) {
+        self.messages.sort_by_key(|m| m.timestamp());
+
+        let mut code_blocks = Vec::new();
+        self.messages.iter_mut().fold(1, |acc, msg| {
+            let msg_blocks = msg.annotate_blocks(acc);
+            let blocks_count = msg_blocks.len();
+            code_blocks.extend(msg_blocks);
+
+            acc + blocks_count
+        });
+
+        self.code_blocks = code_blocks;
     }
 
     pub fn load_from_dump(dump: ThreadDump) -> anyhow::Result<Self> {
         Self::load(&dump.id, dump.assistant, dump.messages)
     }
-
     pub fn load(id: &str, assistant: Assistant, messages: Vec<Message>) -> anyhow::Result<Self> {
         let client = init_client()?;
 
-        let new_thread = Self {
+        let mut new_thread = Self {
             id: id.into(),
             messages,
             assistant,
             client,
-            poll_interval: POLL_INTERVAL_SEC,
+            code_blocks: Vec::new(),
         };
+
+        new_thread.prepare_messages();
 
         Ok(new_thread)
     }
@@ -302,7 +403,7 @@ impl Thread {
             assistant,
             client,
             messages: Vec::new(),
-            poll_interval: POLL_INTERVAL_SEC,
+            code_blocks: Vec::new(),
         })
     }
 
@@ -319,7 +420,7 @@ impl Thread {
 
         let json_val: serde_json::Value = serde_json::from_str(&reply_json)?;
 
-        let mut messages: Vec<Message> = json_val
+        let messages: Vec<Message> = json_val
             .as_object()
             .and_then(|obj| obj.get("data"))
             .and_then(|arr| arr.as_array())
@@ -328,9 +429,8 @@ impl Thread {
             .map(Message::from_json_reply)
             .collect::<anyhow::Result<Vec<Message>>>()?;
 
-        messages.sort_by_key(|m| m.created_at);
-
         self.messages = messages;
+        self.prepare_messages();
         Ok(&mut self.messages)
     }
 
@@ -360,7 +460,7 @@ impl Thread {
         self.add_message(message).await?;
         let run = self.submit().await?;
 
-        let sleep_duration = Duration::from_secs(self.poll_interval as u64);
+        let sleep_duration = Duration::from_secs(POLL_INTERVAL_SEC as u64);
 
         let check_url = openai_url!("/threads/{}/runs/{}", self.id, run.id).to_owned();
 
@@ -417,6 +517,12 @@ pub struct Session {
     threads: HashMap<String, Thread>,
 }
 
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.save().unwrap()
+    }
+}
+
 impl Session {
     pub fn new() -> anyhow::Result<Self> {
         let threads = HashMap::new();
@@ -456,7 +562,7 @@ impl Session {
         self.threads.values().collect()
     }
 
-    fn save(&self) -> anyhow::Result<()> {
+    pub fn save(&self) -> anyhow::Result<()> {
         let json = self
             .threads()
             .iter()
@@ -473,5 +579,56 @@ impl Session {
         let new_thread_id = new_thread.id.to_owned();
         self.threads.insert(new_thread_id.clone(), new_thread);
         Ok(self.threads.get_mut(&new_thread_id).unwrap())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn make_test_message() -> Message {
+        let test_str = r#"
+# Res Publica
+
+Llorum ipsum dolor sit amet.
+```python
+
+for i in range(100):
+    print(f"{i} bottles of beer on the wall")
+
+```
+Quo usque tandem ablutere patientia nostra? Saturnia generumque aetherias turres, quoque abdita excivere et addidit spatioso more. More cum ingens Proserpina harum, perenni conata canna in utque tigridis medio revirescere: Aeneaden.
+
+```javascript 
+
+    const foo = () => {
+        await fetch("https://example.com").then( x => x.json() )
+    }
+
+```"#;
+        Message {
+            id: "test123".into(),
+            created_at: 17000000,
+            thread_id: "thread123".into(),
+            text_content: test_str.into(),
+            role: Role::Assistant,
+            assistant_id: None,
+        }
+    }
+
+    fn test_extract_code_block() {
+        let blocks = make_test_message().code_blocks();
+
+        assert!(blocks.len() == 2);
+        assert_eq!(blocks.get(0).unwrap().language, Some("python".into()))
+    }
+
+    #[test]
+    fn test_annotations() {
+        let _message = make_test_message();
+        let mut annotated_message = make_test_message();
+        annotated_message.annotate_blocks(1);
+
+        println!("{}", annotated_message.text_content);
     }
 }

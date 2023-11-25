@@ -1,25 +1,11 @@
-use anyhow::format_err;
+use gpt::{self, Assistant, Session};
 
-use directories::BaseDirs;
-use gpt::{self, Assistant, Session, Thread};
-
-use std::fs::{self};
 use std::io::{self, Write};
-use std::path::PathBuf;
+
 use std::time::Duration;
 use tokio::time::sleep;
 
 const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
-
-const DATA_DIR_NAME: &str = "gpt_rs";
-
-macro_rules! data_dir {
-    () => {{
-        directories::BaseDirs::new()
-            .ok_or(anyhow::format_err!("Unable to access system directories"))
-            .map(|d| std::path::PathBuf::from(d.data_dir()))
-    }};
-}
 macro_rules! spinner {
     ($b:block) => {{
         let mut _spinner =
@@ -28,18 +14,6 @@ macro_rules! spinner {
         _spinner.stop_with_newline();
         _value
     }};
-}
-
-fn save_thread(thread: &Thread) -> anyhow::Result<()> {
-    let threads_dir = data_dir!()?.join("threads");
-    let thread_filename = format!("threads/{}.json", thread.id);
-    fs::create_dir_all(&threads_dir)?;
-
-    let thread_file = fs::File::create(threads_dir.join(thread_filename))?;
-
-    serde_json::to_writer_pretty(thread_file, &thread.dump_json())?;
-
-    Ok(())
 }
 
 pub enum Assistants {
@@ -75,20 +49,6 @@ impl ChatSession {
         let session = Session::load()?;
 
         Ok(Self { session, assistant })
-    }
-
-    fn save_dir() -> anyhow::Result<PathBuf> {
-        let data_dir = BaseDirs::new()
-            .ok_or(format_err!("Unable to get user data directory"))?
-            .data_dir()
-            .to_path_buf()
-            .join(DATA_DIR_NAME);
-
-        if !data_dir.try_exists()? {
-            fs::create_dir_all(data_dir.as_path())?;
-        }
-
-        Ok(data_dir)
     }
 
     pub async fn run_shell(&mut self) -> anyhow::Result<()> {
