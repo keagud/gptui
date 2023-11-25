@@ -1,7 +1,7 @@
 use gpt::{self, Assistant, Session};
-
 use std::io::{self, Write};
 
+use clap::{arg, command, value_parser, Command, Parser, Subcommand};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -73,6 +73,35 @@ impl ChatSession {
     }
 }
 
+fn cli() -> Command {
+    Command::new("gpt")
+        .about("OpenAI Assistants Wrapper CLI")
+        .subcommand(Command::new("list"))
+        .alias("ls")
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "gpt")]
+#[command(about = "OpenAI Assistants Wrapper CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// List available threads
+    #[command(alias = "ls")]
+    List,
+
+    /// Attach to a thread in a shell
+    #[command(alias = "a")]
+    Attach { thread: u64 },
+
+    #[command(alias = "n")]
+    New,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let asst = Assistant {
@@ -80,6 +109,8 @@ async fn main() -> anyhow::Result<()> {
         name: "Alonzo".into(),
         description: Some("A programming helper".into()),
     };
+
+    let args = Cli::parse();
 
     let mut session = ChatSession::new(asst).await?;
     session.run_shell().await?;
