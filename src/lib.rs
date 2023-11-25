@@ -7,11 +7,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::format_err;
+use db::init_db;
 use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use rusqlite;
+use rusqlite::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -126,6 +128,22 @@ pub struct Assistant {
 pub enum Role {
     User,
     Assistant,
+}
+
+impl From<bool> for Role {
+    fn from(value: bool) -> Self {
+        if value {
+            Self::User
+        } else {
+            Self::Assistant
+        }
+    }
+}
+
+impl Role {
+    pub fn as_bool(&self) -> bool {
+        matches!(self, Self::User)
+    }
 }
 
 impl<'de> Deserialize<'de> for Role {
@@ -269,6 +287,7 @@ impl Message {
         let mut blocks = Vec::new();
         let mut counter = counter_start;
 
+        let annotated = self.text_content.clone();
         let modified_text =
             CODEBLOCK_PATTERN.replace_all(&self.text_content, |cap: &regex::Captures<'_>| {
                 let block = CodeBlock {
@@ -309,6 +328,28 @@ impl Message {
                     .to_owned(),
             })
             .collect()
+    }
+
+    pub fn insert_into_db(&self, db: &rusqlite::Connection) -> anyhow::Result<()> {
+        let sql = r#"
+            INSERT OR ABORT INTO message(id, created_at, text_content, thread_id, role_id, assistant_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+        "#;
+
+        let role_id: usize = self.role.as_bool().into();
+
+        db.execute(
+            sql,
+            (
+                &self.id,
+                &self.created_at,
+                &self.text_content,
+                &self.thread_id,
+                role_id,
+                &self.assistant_id,
+            ),
+        )?;
+
+        Ok(())
     }
 }
 
@@ -352,6 +393,38 @@ impl Thread {
             .min_by_key(|m| m.timestamp())
             .expect("Thread has at least one message")
     }
+
+    pub fn ids_from_db(conn: &rusqlite::Connection) -> anyhow::Result<Vec<String>> {
+        let mut ids: Vec<String> = Vec::new();
+
+        let mut stmt = conn.prepare("SELECT id FROM thread")?;
+
+        let rows = stmt.query_map([], |row| row.get(0))?;
+
+        for row in rows {
+            ids.push(row?);
+        }
+
+        Ok(ids)
+    }
+
+    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<()> {
+        let mut message_ids: Vec<String> = Vec::new();
+
+        let mut stmt = conn.prepare(r#"SELECT id FROM message WHERE thread_id = '?1'  "#)?;
+
+        let rows = stmt.query_map([id], |row| row.get(0))?;
+
+        for row in rows {
+            message_ids.push(row?);
+        }
+
+        //TODO load message from db for each id
+
+        Ok(())
+    }
+
+    pub fn annotated_messages(&self) {}
 
     /// Sort a vec of messages by timestamp
     /// And index their code blocks.
@@ -552,10 +625,9 @@ impl Session {
 
     pub fn load() -> anyhow::Result<Self> {
         let data_dir = data_dir!()?;
+        let db = init_db()?;
 
-        if !data_dir.try_exists()? {
-            fs::create_dir_all(data_dir.as_path())?;
-        }
+        let thread_ids = Thread::ids_from_db(&db)?;
 
         let threads_file = data_dir.join("threads.json");
 

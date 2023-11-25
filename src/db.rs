@@ -1,11 +1,14 @@
+use crate::data_dir;
 use anyhow;
 use directories::BaseDirs;
 use rusqlite::{self, Connection};
-use crate::data_dir;
 
 mod schema {
     pub const SQL: &str = include_str!(concat!(env!("OUT_DIR"), "/schema.sql"));
 }
+
+pub const DB_FILENAME: &str = "gpt.db";
+
 pub fn init_db() -> anyhow::Result<Connection> {
     let db_path = data_dir!()?.join("gpt.db");
     let conn = Connection::open(db_path)?;
