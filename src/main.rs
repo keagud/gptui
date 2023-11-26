@@ -1,7 +1,7 @@
 use gpt::{self, Assistant, Session};
 use std::io::{self, Write};
 
-use clap::{arg, command, value_parser, Command, Parser, Subcommand};
+use clap::{command, Command, Parser, Subcommand};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -112,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
         description: Some("A programming helper".into()),
     };
 
-    let args = Cli::parse();
+    let _args = Cli::parse();
 
     let mut session = ChatSession::new(asst).await?;
     session.run_shell().await?;

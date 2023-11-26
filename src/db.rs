@@ -1,6 +1,6 @@
 use crate::data_dir;
 use anyhow;
-use directories::BaseDirs;
+
 use rusqlite::{self, Connection};
 
 mod schema {

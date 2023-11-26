@@ -12,8 +12,7 @@ use lazy_static::lazy_static;
 use regex::{Regex, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
-use rusqlite;
-use rusqlite::ToSql;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -25,7 +24,7 @@ const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
 const POLL_INTERVAL_SEC: usize = 2;
 
 lazy_static! {
-    static ref CODEBLOCK_PATTERN: Regex = RegexBuilder::new(r#"```(\w+)?(.*?)```"#)
+    static ref CODEBLOCK_PATTERN: Regex = RegexBuilder::new(r"```(\w+)?(.*?)```")
         .dot_matches_new_line(true)
         .build()
         .expect("Premade regex should be ok");
@@ -124,6 +123,12 @@ pub struct Assistant {
     pub description: Option<String>,
 }
 
+impl Assistant {
+    pub fn from_db(_conn: &rusqlite::Connection) -> anyhow::Result<Self> {
+        todo!();
+    }
+}
+
 #[derive(Debug, Serialize, Clone, Copy, Eq, PartialEq)]
 pub enum Role {
     User,
@@ -136,6 +141,23 @@ impl From<bool> for Role {
             Self::User
         } else {
             Self::Assistant
+        }
+    }
+}
+
+impl Role {
+    pub fn from_num(value: usize) -> Self {
+        match value {
+            0 => Self::Assistant,
+            1 => Self::User,
+            _ => panic!("Invalid value for role"),
+        }
+    }
+
+    pub fn to_num(&self) -> usize {
+        match self {
+            Self::User => 1,
+            Self::Assistant => 0,
         }
     }
 }
@@ -197,6 +219,27 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<Self> {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT  created_at, text_content, thread_id, role_id, assistant_id FROM message 
+            WHERE id = ?1
+        "#,
+        )?;
+
+        let message = stmt.query_row([id], |row| {
+            Ok(Message {
+                id: id.to_string(),
+                created_at: row.get(0)?,
+                text_content: row.get(1)?,
+                thread_id: row.get(2)?,
+                role: Role::from_num(row.get(3)?),
+                assistant_id: row.get(4)?,
+            })
+        })?;
+
+        Ok(message)
+    }
     pub fn from_json_text(json_text: &str) -> anyhow::Result<Self> {
         let json_value: serde_json::Value = serde_json::from_str(json_text)?;
         Self::from_json_reply(&json_value)
@@ -287,7 +330,7 @@ impl Message {
         let mut blocks = Vec::new();
         let mut counter = counter_start;
 
-        let annotated = self.text_content.clone();
+        let _annotated = self.text_content.clone();
         let modified_text =
             CODEBLOCK_PATTERN.replace_all(&self.text_content, |cap: &regex::Captures<'_>| {
                 let block = CodeBlock {
@@ -372,7 +415,7 @@ pub struct Thread {
     pub messages: Vec<Message>,
     pub assistant: Assistant,
     client: Client,
-    code_blocks: Vec<CodeBlock>,
+    //TODO this should be a method, not a field
 }
 
 impl Thread {
@@ -383,8 +426,11 @@ impl Thread {
             assistant,
             messages: Vec::new(),
             client,
-            code_blocks: Vec::new(),
         })
+    }
+
+    pub fn code_blocks(&self) -> Vec<CodeBlock> {
+        todo!();
     }
 
     pub fn first_message(&self) -> &Message {
@@ -408,7 +454,7 @@ impl Thread {
         Ok(ids)
     }
 
-    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<()> {
+    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<Self> {
         let mut message_ids: Vec<String> = Vec::new();
 
         let mut stmt = conn.prepare(r#"SELECT id FROM message WHERE thread_id = '?1'  "#)?;
@@ -419,11 +465,24 @@ impl Thread {
             message_ids.push(row?);
         }
 
-        //TODO load message from db for each id
+        let messages = message_ids
+            .into_iter()
+            .map(|id| Message::from_db(conn, &id))
+            .collect::<anyhow::Result<Vec<Message>>>()?;
 
-        Ok(())
+        let assistant = Assistant::from_db(conn)?;
+
+        let new_thread = Thread {
+            id: id.into(),
+            messages,
+            client: init_client()?,
+            assistant,
+        };
+
+        Ok(new_thread)
     }
 
+    // TODO
     pub fn annotated_messages(&self) {}
 
     /// Sort a vec of messages by timestamp
@@ -440,8 +499,6 @@ impl Thread {
 
             acc + blocks_count
         });
-
-        self.code_blocks = code_blocks;
     }
 
     pub fn load_from_dump(dump: ThreadDump) -> anyhow::Result<Self> {
@@ -455,7 +512,6 @@ impl Thread {
             messages,
             assistant,
             client,
-            code_blocks: Vec::new(),
         };
 
         new_thread.prepare_messages();
@@ -487,7 +543,6 @@ impl Thread {
             assistant,
             client,
             messages: Vec::new(),
-            code_blocks: Vec::new(),
         })
     }
 
@@ -598,6 +653,7 @@ impl Thread {
 
 pub struct Session {
     data_dir: PathBuf,
+    assistants: HashMap<String, Assistant>,
     threads: HashMap<String, Thread>,
     db: rusqlite::Connection,
 }
@@ -611,6 +667,7 @@ impl Drop for Session {
 impl Session {
     pub fn new() -> anyhow::Result<Self> {
         let threads = HashMap::new();
+        let assistants = HashMap::new();
 
         let data_dir = data_dir!()?;
 
@@ -618,6 +675,8 @@ impl Session {
 
         Ok(Self {
             threads,
+
+            assistants,
             data_dir,
             db,
         })
@@ -627,7 +686,7 @@ impl Session {
         let data_dir = data_dir!()?;
         let db = init_db()?;
 
-        let thread_ids = Thread::ids_from_db(&db)?;
+        let _thread_ids = Thread::ids_from_db(&db)?;
 
         let threads_file = data_dir.join("threads.json");
 
@@ -649,6 +708,7 @@ impl Session {
 
         Ok(Self {
             threads,
+            assistants: HashMap::new(),
             data_dir,
             db,
         })
