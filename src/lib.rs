@@ -13,7 +13,7 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 
 use rusqlite::types::FromSql;
-use rusqlite::ToSql;
+use rusqlite::{named_params, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -214,7 +214,6 @@ impl FromSql for Role {
             .map_err(|_| rusqlite::types::FromSqlError::OutOfRange(n))
     }
 }
-
 
 impl<'de> Deserialize<'de> for Role {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -512,7 +511,7 @@ impl Thread {
         "#,
         )?;
 
-        let messages = stmt
+        let mut messages = stmt
             .query_map([id], |row| {
                 Ok(Message {
                     id: id.to_string(),
@@ -524,6 +523,8 @@ impl Thread {
                 })
             })?
             .collect::<Result<Vec<Message>, rusqlite::Error>>()?;
+
+        messages.sort_by_key(|m| m.created_at);
 
         let assistant = Assistant::from_db(conn)?;
 
@@ -537,7 +538,51 @@ impl Thread {
         Ok(new_thread)
     }
 
-    pub fn dump_db(&self, conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    pub fn dump_db(&self, conn: &mut rusqlite::Connection) -> Result<(), rusqlite::Error> {
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            r#"
+            INSERT OR IGNORE INTO thread (id) 
+            VALUES (?1)
+            "#,
+            [&self.id],
+        )?;
+
+        {
+            let mut add_msg = tx.prepare(
+                r#"
+                INSERT OR IGNORE INTO message (
+                    id, 
+                    created_at, 
+                    text_content, 
+                    thread_id, 
+                    role_id, 
+                    assistant_id
+                ) VALUES (
+                    :id, 
+                    :created_at, 
+                    :text_content, 
+                    :thread_id, 
+                    :role_id, 
+                    :assistant_id
+                ) 
+                "#,
+            )?;
+
+            for message in self.messages.iter() {
+                add_msg.execute(named_params! {
+                    ":id": &message.id,
+                    ":created_at": (message.created_at as i64),
+                    ":text_content": &message.text_content,
+                    ":thread_id": &self.id,
+                    ":role_id": message.role.to_sql()?,
+                    ":assistant_id": &message.assistant_id.to_sql()?
+                })?;
+            }
+        }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -547,6 +592,7 @@ impl Thread {
     pub fn load_from_dump(dump: ThreadDump) -> anyhow::Result<Self> {
         Self::load(&dump.id, dump.assistant, dump.messages)
     }
+
     pub fn load(id: &str, assistant: Assistant, messages: Vec<Message>) -> anyhow::Result<Self> {
         let client = init_client()?;
 
@@ -693,19 +739,13 @@ impl Thread {
 pub struct Session {
     data_dir: PathBuf,
     assistants: HashMap<String, Assistant>,
-    threads: HashMap<String, Thread>,
+    threads: Vec<Thread>,
     db: rusqlite::Connection,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        self.save().unwrap()
-    }
 }
 
 impl Session {
     pub fn new() -> anyhow::Result<Self> {
-        let threads = HashMap::new();
+        let threads = Vec::new();
         let assistants = HashMap::new();
 
         let data_dir = data_dir!()?;
@@ -725,25 +765,10 @@ impl Session {
         let data_dir = data_dir!()?;
         let db = init_db()?;
 
-        let _thread_ids = Thread::ids_from_db(&db)?;
-
-        let threads_file = data_dir.join("threads.json");
-
-        let threads_dump: Vec<ThreadDump> = if threads_file.try_exists()? {
-            let fp = fs::File::open(threads_file)?;
-            serde_json::from_reader(fp)?
-        } else {
-            Vec::new()
-        };
-
-        let threads: HashMap<String, Thread> = threads_dump
-            .into_iter()
-            .map(|t| Thread::load_from_dump(t).map(|t| (t.id.clone(), t)))
-            .collect::<anyhow::Result<Vec<(String, Thread)>>>()?
-            .into_iter()
-            .collect();
-
-        let db = db::init_db()?;
+        let threads: Vec<Thread> = Thread::ids_from_db(&db)?
+            .iter()
+            .map(|id| Thread::from_db(&db, id))
+            .collect::<anyhow::Result<Vec<Thread>>>()?;
 
         Ok(Self {
             threads,
@@ -753,27 +778,10 @@ impl Session {
         })
     }
 
-    pub fn threads(&self) -> Vec<&Thread> {
-        self.threads.values().collect()
-    }
-
-    pub fn save(&self) -> anyhow::Result<()> {
-        let json = self
-            .threads()
-            .iter()
-            .map(|t| t.dump_json())
-            .collect::<Vec<serde_json::Value>>();
-
-        let fp = fs::File::create(self.data_dir.join("threads.json"))?;
-        serde_json::to_writer_pretty(fp, &json)?;
-
-        Ok(())
-    }
     pub async fn create_thread(&mut self, assistant: Assistant) -> anyhow::Result<&mut Thread> {
         let new_thread = Thread::create(assistant).await?;
-        let new_thread_id = new_thread.id.to_owned();
-        self.threads.insert(new_thread_id.clone(), new_thread);
-        Ok(self.threads.get_mut(&new_thread_id).unwrap())
+        self.threads.push(new_thread);
+        Ok(self.threads.last_mut().unwrap())
     }
 }
 

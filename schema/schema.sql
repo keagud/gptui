@@ -1,8 +1,3 @@
-CREATE TABLE IF NOT EXISTS role(
-  id INTEGER PRIMARY KEY,
-  label TEXT NOT NULL
-);
-
 
 CREATE TABLE IF NOT EXISTS assistant(
   id VARCHAR PRIMARY KEY,
@@ -19,7 +14,6 @@ CREATE TABLE IF NOT EXISTS message(
   assistant_id VARCHAR,
   FOREIGN KEY(thread_id) REFERENCES thread(id),
   FOREIGN KEY(assistant_id) REFERENCES assistant(id),
-  FOREIGN KEY(role_id) REFERENCES role(id)  
 );
 
 
