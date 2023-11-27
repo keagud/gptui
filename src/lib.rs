@@ -135,7 +135,21 @@ pub struct Assistant {
 impl FromDB for Assistant {
     type Error = rusqlite::Error;
     fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Self, Self::Error> {
-        todo!();
+        conn.query_row_and_then(
+            r#"
+            SELECT  name, description 
+            FROM assistant 
+            WHERE id = ?1
+            "#,
+            [id],
+            |row| {
+                Ok(Assistant {
+                    id: id.to_owned(),
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                })
+            },
+        )
     }
 }
 

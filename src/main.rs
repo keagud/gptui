@@ -112,10 +112,8 @@ async fn main() -> anyhow::Result<()> {
         description: Some("A programming helper".into()),
     };
 
-    let _args = Cli::parse();
+    let mut session = Session::load()?;
 
-    let mut session = ChatSession::new(asst).await?;
-    session.run_shell().await?;
 
     Ok(())
 }
