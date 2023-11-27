@@ -98,6 +98,14 @@ fn init_client() -> anyhow::Result<Client> {
     Ok(client)
 }
 
+pub trait FromDB
+where
+    Self: Sized,
+{
+    type Error;
+    fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Self, Self::Error>;
+}
+
 async fn create_thread(client: &Client) -> anyhow::Result<String> {
     let req = client.post(openai_url!("/threads"));
 
@@ -124,9 +132,22 @@ pub struct Assistant {
     pub description: Option<String>,
 }
 
-impl Assistant {
-    pub fn from_db(_conn: &rusqlite::Connection) -> anyhow::Result<Self> {
+impl FromDB for Assistant {
+    type Error = rusqlite::Error;
+    fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Self, Self::Error> {
         todo!();
+    }
+}
+
+impl Assistant {
+    pub fn all_ids(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = conn.prepare("SELECT id FROM assistant")?;
+
+        let res = stmt
+            .query_and_then([], |r| r.get::<_, String>(0))?
+            .collect();
+
+        res
     }
 }
 
@@ -265,8 +286,9 @@ pub struct Message {
     assistant_id: Option<String>,
 }
 
-impl Message {
-    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<Self> {
+impl FromDB for Message {
+    type Error = rusqlite::Error;
+    fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Message, Self::Error> {
         let mut stmt = conn.prepare(
             r#"
             SELECT  created_at, text_content, thread_id, role_id, assistant_id FROM message 
@@ -287,6 +309,9 @@ impl Message {
 
         Ok(message)
     }
+}
+
+impl Message {
     pub fn from_json_text(json_text: &str) -> anyhow::Result<Self> {
         let json_value: serde_json::Value = serde_json::from_str(json_text)?;
         Self::from_json_reply(&json_value)
@@ -460,9 +485,55 @@ pub struct ThreadDump {
 pub struct Thread {
     pub id: String,
     pub messages: Vec<Message>,
-    pub assistant: Assistant,
+    pub assistant: Option<Assistant>,
     client: Client,
     //TODO this should be a method, not a field
+}
+
+impl FromDB for Thread {
+    type Error = anyhow::Error;
+    fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Self, Self::Error> {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT  created_at, text_content, thread_id, role_id, assistant_id 
+            FROM message 
+            WHERE thread_id = ?1
+            ORDER BY created_at ASC
+        "#,
+        )?;
+
+        let mut messages = stmt
+            .query_map([id], |row| {
+                Ok(Message {
+                    id: id.to_string(),
+                    created_at: row.get(0)?,
+                    text_content: row.get(1)?,
+                    thread_id: row.get(2)?,
+                    role: Role::from_num(row.get(3)?),
+                    assistant_id: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<Message>, rusqlite::Error>>()?;
+
+        messages.sort_by_key(|m| m.created_at);
+
+        let assistant = if let Some(assistant_id) =
+            messages.first().and_then(|ref m| m.assistant_id.as_ref())
+        {
+            Some(Assistant::from_db(&conn, &assistant_id)?)
+        } else {
+            None
+        };
+
+        let new_thread = Thread {
+            id: id.into(),
+            messages,
+            client: init_client()?,
+            assistant,
+        };
+
+        Ok(new_thread)
+    }
 }
 
 impl Thread {
@@ -470,7 +541,7 @@ impl Thread {
         let client = init_client()?;
         Ok(Thread {
             id: id.into(),
-            assistant,
+            assistant: Some(assistant),
             messages: Vec::new(),
             client,
         })
@@ -500,44 +571,6 @@ impl Thread {
 
         Ok(ids)
     }
-
-    pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<Self> {
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT  created_at, text_content, thread_id, role_id, assistant_id 
-            FROM message 
-            WHERE thread_id = ?1
-            ORDER BY created_at ASC
-        "#,
-        )?;
-
-        let mut messages = stmt
-            .query_map([id], |row| {
-                Ok(Message {
-                    id: id.to_string(),
-                    created_at: row.get(0)?,
-                    text_content: row.get(1)?,
-                    thread_id: row.get(2)?,
-                    role: Role::from_num(row.get(3)?),
-                    assistant_id: row.get(4)?,
-                })
-            })?
-            .collect::<Result<Vec<Message>, rusqlite::Error>>()?;
-
-        messages.sort_by_key(|m| m.created_at);
-
-        let assistant = Assistant::from_db(conn)?;
-
-        let new_thread = Thread {
-            id: id.into(),
-            messages,
-            client: init_client()?,
-            assistant,
-        };
-
-        Ok(new_thread)
-    }
-
     pub fn dump_db(&self, conn: &mut rusqlite::Connection) -> Result<(), rusqlite::Error> {
         let tx = conn.transaction()?;
 
@@ -599,7 +632,7 @@ impl Thread {
         let mut new_thread = Self {
             id: id.into(),
             messages,
-            assistant,
+            assistant: assistant.into(),
             client,
         };
 
@@ -627,7 +660,7 @@ impl Thread {
 
         Ok(Thread {
             id,
-            assistant,
+            assistant: assistant.into(),
             client,
             messages: Vec::new(),
         })
@@ -662,7 +695,8 @@ impl Thread {
     /// Submit the current state of the thread for a run.
     /// Return the Run object
     async fn submit(&self) -> anyhow::Result<Run> {
-        let request_json_str = json!({"assistant_id" : &self.assistant.id }).to_string();
+        let request_json_str =
+            json!({"assistant_id" : &self.assistant.as_ref().unwrap().id }).to_string();
 
         let reply_json_str = self
             .client
