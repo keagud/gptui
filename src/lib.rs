@@ -788,7 +788,6 @@ impl Session {
 
         Ok(Self {
             threads,
-
             assistants,
             data_dir,
             db,
@@ -804,9 +803,17 @@ impl Session {
             .map(|id| Thread::from_db(&db, id))
             .collect::<anyhow::Result<Vec<Thread>>>()?;
 
+        let assistants: HashMap<String, Assistant> = Assistant::all_ids(&db)?
+            .iter()
+            .map(|id| Assistant::from_db(&db, id).map_err(|e| e.into()))
+            .collect::<anyhow::Result<Vec<Assistant>>>()?
+            .into_iter()
+            .map(|a| (a.id.clone(), a))
+            .collect();
+
         Ok(Self {
             threads,
-            assistants: HashMap::new(),
+            assistants,
             data_dir,
             db,
         })
