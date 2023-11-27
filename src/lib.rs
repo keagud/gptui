@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-
+#[allow(dead_code)]
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
@@ -13,6 +12,8 @@ use regex::{Regex, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 
+use rusqlite::types::FromSql;
+use rusqlite::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -131,8 +132,8 @@ impl Assistant {
 
 #[derive(Debug, Serialize, Clone, Copy, Eq, PartialEq)]
 pub enum Role {
-    User,
-    Assistant,
+    User = 1,
+    Assistant = 2,
 }
 
 impl From<bool> for Role {
@@ -167,6 +168,53 @@ impl Role {
         matches!(self, Self::User)
     }
 }
+
+impl TryFrom<i64> for Role {
+    type Error = String;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if value.is_negative() {
+            Err(format!("Cannot handle negative values"))
+        } else {
+            Ok(value as usize)
+        }
+        .and_then(|n| n.try_into())
+    }
+}
+
+impl TryFrom<usize> for Role {
+    type Error = String;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::User),
+            2 => Ok(Self::Assistant),
+            _ => Err(format!("'{value}' is invalid; must be 1 or 2")),
+        }
+    }
+}
+
+impl ToSql for Role {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        let val = match self {
+            // leaving 0 unassigned for superstition tbh
+            Self::User => 1,
+            Self::Assistant => 2,
+        };
+
+        Ok(val.into())
+    }
+}
+
+impl FromSql for Role {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        let n = value.as_i64()?;
+
+        n.try_into()
+            .map_err(|_| rusqlite::types::FromSqlError::OutOfRange(n))
+    }
+}
+
 
 impl<'de> Deserialize<'de> for Role {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -455,20 +503,27 @@ impl Thread {
     }
 
     pub fn from_db(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<Self> {
-        let mut message_ids: Vec<String> = Vec::new();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT  created_at, text_content, thread_id, role_id, assistant_id 
+            FROM message 
+            WHERE thread_id = ?1
+            ORDER BY created_at ASC
+        "#,
+        )?;
 
-        let mut stmt = conn.prepare(r#"SELECT id FROM message WHERE thread_id = '?1'  "#)?;
-
-        let rows = stmt.query_map([id], |row| row.get(0))?;
-
-        for row in rows {
-            message_ids.push(row?);
-        }
-
-        let messages = message_ids
-            .into_iter()
-            .map(|id| Message::from_db(conn, &id))
-            .collect::<anyhow::Result<Vec<Message>>>()?;
+        let messages = stmt
+            .query_map([id], |row| {
+                Ok(Message {
+                    id: id.to_string(),
+                    created_at: row.get(0)?,
+                    text_content: row.get(1)?,
+                    thread_id: row.get(2)?,
+                    role: Role::from_num(row.get(3)?),
+                    assistant_id: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<Message>, rusqlite::Error>>()?;
 
         let assistant = Assistant::from_db(conn)?;
 
@@ -482,24 +537,12 @@ impl Thread {
         Ok(new_thread)
     }
 
+    pub fn dump_db(&self, conn: &rusqlite::Connection) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     // TODO
     pub fn annotated_messages(&self) {}
-
-    /// Sort a vec of messages by timestamp
-    /// And index their code blocks.
-    /// Mutates in place.
-    fn prepare_messages(&mut self) {
-        self.messages.sort_by_key(|m| m.timestamp());
-
-        let mut code_blocks = Vec::new();
-        self.messages.iter_mut().fold(1, |acc, msg| {
-            let msg_blocks = msg.annotate_blocks(acc);
-            let blocks_count = msg_blocks.len();
-            code_blocks.extend(msg_blocks);
-
-            acc + blocks_count
-        });
-    }
 
     pub fn load_from_dump(dump: ThreadDump) -> anyhow::Result<Self> {
         Self::load(&dump.id, dump.assistant, dump.messages)
@@ -513,8 +556,6 @@ impl Thread {
             assistant,
             client,
         };
-
-        new_thread.prepare_messages();
 
         Ok(new_thread)
     }
@@ -569,7 +610,6 @@ impl Thread {
             .collect::<anyhow::Result<Vec<Message>>>()?;
 
         self.messages = messages;
-        self.prepare_messages();
         Ok(&mut self.messages)
     }
 
@@ -617,8 +657,7 @@ impl Thread {
 
             match run_update.status.to_ascii_lowercase().trim() {
                 "completed" => break,
-                "queued" => (),
-                "in_progress" => (),
+                "queued" | "in_progress" => (),
                 _ => return Err(format_err!("Run status is {}", run_update.status)),
             }
 
