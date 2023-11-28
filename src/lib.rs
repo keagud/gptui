@@ -13,7 +13,7 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 
 use rusqlite::types::FromSql;
-use rusqlite::{named_params, ToSql};
+use rusqlite::{named_params, params, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json};
 use tokio::time::sleep;
@@ -61,7 +61,7 @@ macro_rules! data_dir {
     () => {{
         directories::BaseDirs::new()
             .ok_or(anyhow::format_err!("Unable to access system directories"))
-            .map(|d| std::path::PathBuf::from(d.data_dir()).join("gpt_rs"))
+            .map(|d| dbg!(std::path::PathBuf::from(d.data_dir()).join("gpt_rs")))
             .and_then(|p| {
                 match p.try_exists() {
                     Ok(false) => std::fs::create_dir_all(&p).map(|_| p),
@@ -163,45 +163,22 @@ impl Assistant {
 
         res
     }
+
+    pub fn dump_db(&mut self, conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+        conn.execute(
+            r#"INSERT OR IGNORE INTO 
+        assistant (id, name, description"#,
+            params![&self.id, &self.name, &self.description.to_sql()?],
+        )?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Copy, Eq, PartialEq)]
 pub enum Role {
     User = 1,
     Assistant = 2,
-}
-
-impl From<bool> for Role {
-    fn from(value: bool) -> Self {
-        if value {
-            Self::User
-        } else {
-            Self::Assistant
-        }
-    }
-}
-
-impl Role {
-    pub fn from_num(value: usize) -> Self {
-        match value {
-            0 => Self::Assistant,
-            1 => Self::User,
-            _ => panic!("Invalid value for role"),
-        }
-    }
-
-    pub fn to_num(&self) -> usize {
-        match self {
-            Self::User => 1,
-            Self::Assistant => 0,
-        }
-    }
-}
-
-impl Role {
-    pub fn as_bool(&self) -> bool {
-        matches!(self, Self::User)
-    }
 }
 
 impl TryFrom<i64> for Role {
@@ -272,6 +249,13 @@ impl<'de> Deserialize<'de> for Role {
     }
 }
 
+impl Role {
+    pub fn from_num(n: i64) -> anyhow::Result<Self> {
+        let s: Self = n.try_into().map_err(|e| format_err!("{e}"))?;
+        Ok(s)
+    }
+}
+
 #[derive(Debug)]
 pub struct CodeBlock {
     pub language: Option<String>,
@@ -301,7 +285,7 @@ pub struct Message {
 }
 
 impl FromDB for Message {
-    type Error = rusqlite::Error;
+    type Error = anyhow::Error;
     fn from_db(conn: &rusqlite::Connection, id: &str) -> Result<Message, Self::Error> {
         let mut stmt = conn.prepare(
             r#"
@@ -310,18 +294,22 @@ impl FromDB for Message {
         "#,
         )?;
 
-        let message = stmt.query_row([id], |row| {
+        Ok(stmt.query_row([id], |row| {
             Ok(Message {
                 id: id.to_string(),
                 created_at: row.get(0)?,
                 text_content: row.get(1)?,
                 thread_id: row.get(2)?,
-                role: Role::from_num(row.get(3)?),
+                role: Role::from_num(row.get::<_, i64>(3)?).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Integer,
+                        e.into(),
+                    )
+                })?,
                 assistant_id: row.get(4)?,
             })
-        })?;
-
-        Ok(message)
+        })?)
     }
 }
 
@@ -464,18 +452,16 @@ impl Message {
             INSERT OR ABORT INTO message(id, created_at, text_content, thread_id, role_id, assistant_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
         "#;
 
-        let role_id: usize = self.role.as_bool().into();
-
         db.execute(
             sql,
-            (
+            params![
                 &self.id,
                 &self.created_at,
                 &self.text_content,
                 &self.thread_id,
-                role_id,
+                &self.role,
                 &self.assistant_id,
-            ),
+            ],
         )?;
 
         Ok(())
@@ -523,7 +509,13 @@ impl FromDB for Thread {
                     created_at: row.get(0)?,
                     text_content: row.get(1)?,
                     thread_id: row.get(2)?,
-                    role: Role::from_num(row.get(3)?),
+                    role: Role::from_num(row.get(3)?).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Integer,
+                            e.into(),
+                        )
+                    })?,
                     assistant_id: row.get(4)?,
                 })
             })?
@@ -565,11 +557,12 @@ impl Thread {
         todo!();
     }
 
-    pub fn first_message(&self) -> &Message {
-        self.messages
-            .iter()
-            .min_by_key(|m| m.timestamp())
-            .expect("Thread has at least one message")
+    pub fn first_message(&self) -> Option<&Message> {
+        self.messages.iter().min_by_key(|m| m.timestamp())
+    }
+
+    pub fn last_message(&self) -> Option<&Message> {
+        self.messages.iter().max_by_key(|m| m.timestamp())
     }
 
     pub fn ids_from_db(conn: &rusqlite::Connection) -> anyhow::Result<Vec<String>> {
@@ -693,14 +686,14 @@ impl Thread {
 
         let json_val: serde_json::Value = serde_json::from_str(&reply_json)?;
 
-        let messages: Vec<Message> = json_val
+        let messages: Vec<Message> = dbg!(json_val
             .as_object()
             .and_then(|obj| obj.get("data"))
             .and_then(|arr| arr.as_array())
             .ok_or(format_err!("Cannot parse messages from JSON"))?
             .iter()
             .map(Message::from_json_reply)
-            .collect::<anyhow::Result<Vec<Message>>>()?;
+            .collect::<anyhow::Result<Vec<Message>>>()?);
 
         self.messages = messages;
         Ok(&mut self.messages)
@@ -747,7 +740,7 @@ impl Thread {
                 .text()
                 .await?;
 
-            let run_update: Run = serde_json::from_str(&reply)?;
+            let run_update: Run = dbg!(serde_json::from_str(&reply)?);
 
             match run_update.status.to_ascii_lowercase().trim() {
                 "completed" => break,
@@ -786,8 +779,8 @@ impl Thread {
 
 pub struct Session {
     data_dir: PathBuf,
-    assistants: HashMap<String, Assistant>,
-    threads: Vec<Thread>,
+    pub assistants: HashMap<String, Assistant>,
+    pub threads: Vec<Thread>,
     db: rusqlite::Connection,
 }
 
@@ -837,6 +830,24 @@ impl Session {
         let new_thread = Thread::create(assistant).await?;
         self.threads.push(new_thread);
         Ok(self.threads.last_mut().unwrap())
+    }
+
+    pub fn save(&mut self) -> anyhow::Result<()> {
+        for asst in self.assistants.values_mut() {
+            asst.dump_db(&mut self.db).unwrap();
+        }
+
+        for thread in self.threads.iter() {
+            thread.dump_db(&mut self.db).unwrap();
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.save().unwrap();
     }
 }
 

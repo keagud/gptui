@@ -114,6 +114,14 @@ async fn main() -> anyhow::Result<()> {
 
     let mut session = Session::load()?;
 
+    for t in session.threads.iter() {
+        println!("{}", t.first_message().unwrap().message_text());
+    }
+
+    // let thread = session.create_thread(asst).await?;
+    // let reply = thread.await_reply("Write FizzBuzz in APL").await?;
+
+    // println!("{:?}", reply);
 
     Ok(())
 }

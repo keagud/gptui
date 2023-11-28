@@ -10,10 +10,9 @@ CREATE TABLE IF NOT EXISTS message(
   created_at INTEGER NOT NULL,
   text_content TEXT NOT NULL,
   thread_id VARCHAR NOT NULL,
-  role_id INTEGER NOT NULL ,
+  role_id INTEGER NOT NULL,
   assistant_id VARCHAR,
-  FOREIGN KEY(thread_id) REFERENCES thread(id),
-  FOREIGN KEY(assistant_id) REFERENCES assistant(id),
+  FOREIGN KEY(thread_id) REFERENCES thread(id)
 );
 
 
