@@ -1,127 +1,143 @@
-use gpt::{self, Assistant, Session};
+use regex::{self, RegexBuilder};
+use reqwest::header::{self, HeaderMap, HeaderValue};
+use reqwest::{Client};
+use serde::{Deserialize, Serialize};
+use serde_json::{self, json, Value};
 use std::io::{self, Write};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio_stream::StreamExt;
+use tokio_util::io::StreamReader;
 
-use clap::{command, Command, Parser, Subcommand};
-use std::time::Duration;
-use tokio::time::sleep;
+const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 
-pub use gpt::data_dir;
-
-const ALONZO_ID: &str = "asst_dmPg6sGBpzXbVrWOxafSTC9Q";
-macro_rules! spinner {
-    ($b:block) => {{
-        let mut _spinner =
-            spinners::Spinner::new(spinners::Spinners::Dots, std::string::String::new());
-        let _value = { $b };
-        _spinner.stop_with_newline();
-        _value
-    }};
+enum Role {
+    User,
+    System,
 }
 
-pub enum Assistants {
-    ALONZO,
+fn create_client() -> anyhow::Result<Client> {
+    let token = env!("OPENAI_API_KEY");
+
+    let headers: HeaderMap = [
+        (
+            header::AUTHORIZATION,
+            HeaderValue::from_str(format!("Bearer {token}").as_str())?,
+        ),
+        (
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| e.into())
 }
 
-async fn print_formatted_reply(text: &str) -> anyhow::Result<()> {
-    let delay = Duration::from_millis(100);
+#[derive(Deserialize, Serialize, Debug)]
+struct CompletionDelta {
+    content: Option<String>,
+}
 
-    // TODO change the render width to add a margin
-    let formatted = termimad::term_text(text);
+#[derive(Serialize, Deserialize, Debug)]
+struct CompletionChoice {
+    delta: CompletionDelta,
+    finish_reason: Option<String>,
+    index: usize,
+}
 
-    let mut stdout = io::stdout();
+#[derive(Serialize, Deserialize, Debug)]
+struct CompletionChunk {
+    id: String,
+    created: usize,
+    choices: Vec<CompletionChoice>,
+}
 
-    for chunk in formatted.to_string().as_bytes().chunks(8) {
-        stdout.write(chunk)?;
-        stdout.flush()?;
-
-        sleep(delay).await
+impl CompletionChunk {
+    pub fn token(&self) -> Option<String> {
+        self.choices
+            .first()
+            .and_then(|c| c.delta.content.to_owned())
     }
-
-    stdout.flush()?;
-    Ok(())
 }
 
-struct ChatSession {
-    assistant: Assistant,
-    session: Session,
-}
+async fn get_reply(msg: &str, output_writer: &mut impl Write) -> anyhow::Result<()> {
+    let client = create_client()?;
 
-impl ChatSession {
-    pub async fn new(assistant: Assistant) -> anyhow::Result<Self> {
-        let session = Session::load()?;
+    let data = json!({
+        "model" : "gpt-4",
+        "messages" : [
+         {
+            "role" : "system",
+            "content" : "You are a helpful assistant"
+        },
+        {
+            "role" : "user",
+            "content" : msg
+        }
+    ],
+        "stream" : true,
+        "max_tokens" : 50
+    });
 
-        Ok(Self { session, assistant })
-    }
+    let response = client
+        .post(OPENAI_URL)
+        .json(&data)
+        .send()
+        .await?
+        .error_for_status()?;
 
-    pub async fn run_shell(&mut self) -> anyhow::Result<()> {
-        let mut buf = String::new();
-        let prompt = ">> ";
+    let mut buffer = Vec::new();
 
-        let thread = spinner!({ self.session.create_thread(self.assistant.clone()).await? });
-        loop {
-            buf.clear();
-            print!("{}", prompt);
-            io::stdout().flush()?;
+    let stream = response
+        .bytes_stream()
+        .map(|e| e.map_err(tokio::io::Error::other));
 
-            io::stdin().read_line(&mut buf)?;
-            let user_input = buf.trim();
+    let mut stream_reader = StreamReader::new(stream);
 
-            let reply_message = spinner!({ thread.await_reply(user_input).await? });
+    let buffered_reader = BufReader::new(&mut stream_reader);
+    let mut lines = buffered_reader.lines();
 
-            print_formatted_reply(reply_message.message_text()).await?;
+    let pat = RegexBuilder::new(r"^\s*data:")
+        .multi_line(true)
+        .build()
+        .unwrap();
 
-            io::stdout().flush()?;
+    while let Some(line) = lines.next_line().await? {
+        let line = pat.replace(line.trim(), "");
+        if !line.is_empty() {
+            match serde_json::from_str::<Value>(&line) {
+                Ok(chunk) => {
+                    let completion_chunk: CompletionChunk = serde_json::from_value(chunk)?;
+
+                    if let Some(token) = completion_chunk.token() {
+                        output_writer.write_all(token.as_bytes())?;
+                        output_writer.flush()?;
+                    }
+
+                    buffer.clear();
+                }
+
+                Err(_) => {
+                    buffer.push(line.to_string());
+                }
+            }
         }
     }
-}
 
-fn cli() -> Command {
-    Command::new("gpt")
-        .about("OpenAI Assistants Wrapper CLI")
-        .subcommand(Command::new("list"))
-        .alias("ls")
-}
-
-#[derive(Debug, Parser)]
-#[command(name = "gpt")]
-#[command(about = "OpenAI Assistants Wrapper CLI")]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Debug, Subcommand)]
-enum Commands {
-    /// List available threads
-    #[command(alias = "ls")]
-    List,
-
-    /// Attach to a thread in a shell
-    #[command(alias = "a")]
-    Attach { thread: u64 },
-
-    #[command(alias = "n")]
-    New,
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let asst = Assistant {
-        id: ALONZO_ID.into(),
-        name: "Alonzo".into(),
-        description: Some("A programming helper".into()),
-    };
+    let msg = "Come up with 10 possible pun-based names for a fertility clinic that is also a video game store.";
 
-    let mut session = Session::load()?;
+    let mut stdout = io::stdout();
 
-    for t in session.threads.iter() {
-        println!("{}", t.first_message().unwrap().message_text());
-    }
-
-    // let thread = session.create_thread(asst).await?;
-    // let reply = thread.await_reply("Write FizzBuzz in APL").await?;
-
-    // println!("{:?}", reply);
+    get_reply(msg, &mut stdout).await?;
 
     Ok(())
 }
