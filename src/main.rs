@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod db;
 use std::io::{self, Write};
 use tokio::io::AsyncBufReadExt;
 

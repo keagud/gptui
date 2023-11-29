@@ -10,6 +10,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
+use anyhow;
+use anyhow::format_err;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -21,6 +23,31 @@ enum Role {
     User,
     System,
     Assistant,
+}
+
+impl Role {
+    pub fn to_num(&self) -> usize {
+        match self {
+            Role::System => 1,
+            Role::User => 2,
+            Role::Assistant => 3,
+        }
+    }
+
+    pub fn from_num(num: usize) -> anyhow::Result<Self > {
+
+        match num {
+            1 => Ok(Role::System),
+            2 => Ok(Role::User),
+            3 => Ok(Role::Assistant),
+            _ => Err(format_err!("Role value must be 1, 2, or 3"))
+
+
+        }
+
+
+
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
