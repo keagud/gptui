@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::{Thread, Message, Role};
+use crate::{Message, Role, Thread};
 
 use anyhow;
 use directories::BaseDirs;
@@ -66,6 +66,7 @@ pub fn init_db() -> anyhow::Result<Connection> {
 pub trait DbStore: Sized {
     fn from_db(conn: &Connection, id: Uuid) -> anyhow::Result<Self>;
     fn to_db(&self, conn: &mut Connection) -> anyhow::Result<()>;
+    fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>>;
 }
 
 impl DbStore for Thread {
@@ -81,7 +82,7 @@ impl DbStore for Thread {
             .prepare(
                 r#"
             SELECT timestamp FROM message 
-            WHERE thread_id = ?1"
+            WHERE thread_id = ?1
             ORDER BY timestamp DESC
             LIMIT 1
             "#,
@@ -149,5 +150,16 @@ impl DbStore for Thread {
             model,
             id,
         })
+    }
+
+    fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>> {
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM thread")?
+            .query_and_then([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+
+        ids.into_iter()
+            .map(|id| Self::from_db(conn, Uuid::parse_str(&id)?))
+            .collect()
     }
 }

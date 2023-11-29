@@ -10,6 +10,7 @@ anyhow = "1.0.75"
 arboard = "3.3.0"
 async-fs = "2.1.0"
 clap = { version = "4.4.8", features = ["derive"] }
+ctrlc = "3.4.1"
 derive_builder = "0.12.0"
 directories = "5.0.1"
 dotenvy = "0.15.7"
@@ -21,6 +22,8 @@ rusqlite = { version = "0.30.0", features = ["bundled"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_derive = "1.0.193"
 serde_json = "1.0.108"
+signal-hook = "0.3.17"
+signal-hook-tokio = "0.3.1"
 spinners = "4.1.1"
 termimad = "0.26.1"
 thiserror = "1.0.50"

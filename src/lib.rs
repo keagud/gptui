@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::io::{self, Stdout, Write};
+use std::io::{self, Read, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::AsyncRead;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -29,7 +30,7 @@ fn timestamp() -> f64 {
         .as_millis() as f64
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     #[default]
@@ -61,6 +62,8 @@ impl Role {
 pub struct Message {
     pub role: Role,
     pub content: String,
+
+    #[serde(skip)]
     pub timestamp: f64,
 }
 
@@ -164,8 +167,20 @@ where
 {
     writer: Option<T>,
     client: Client,
-    threads: HashMap<Uuid, Thread>,
+    pub threads: HashMap<Uuid, Thread>,
     db: rusqlite::Connection,
+}
+
+impl Session<Stdout> {
+    /// Create a new Session that will write its output to stdout
+    pub fn new_stdout() -> anyhow::Result<Session<Stdout>> {
+        Ok(Session {
+            writer: Some(io::stdout()),
+            client: create_client()?,
+            threads: HashMap::new(),
+            db: init_db()?,
+        })
+    }
 }
 
 impl<T> Session<T>
@@ -181,14 +196,15 @@ where
         })
     }
 
-    /// Create a new Session that will write its output to stdout
-    pub fn new_stdout() -> anyhow::Result<Session<Stdout>> {
-        Ok(Session {
-            writer: Some(io::stdout()),
-            client: create_client()?,
-            threads: HashMap::new(),
-            db: init_db()?,
-        })
+    pub fn load_threads(&mut self) -> anyhow::Result<()> {
+        let loaded_threads = Thread::get_all(&mut self.db)?
+            .into_iter()
+            .map(|t| (t.id, t))
+            .collect();
+
+        self.threads = loaded_threads;
+
+        Ok(())
     }
 
     pub fn writer(&mut self) -> Option<&mut T> {
@@ -241,9 +257,13 @@ where
     /// Main interface method to send a message to a thread and await a reply.
     /// The response is written to the session's writer, and saved to the thread state.
     pub async fn send_user_message(&mut self, msg: &str, thread_id: Uuid) -> anyhow::Result<()> {
+        if msg.trim().is_empty() {
+            return Ok(());
+        }
+
         let user_message = Message {
             role: Role::User,
-            content: msg.into(),
+            content: msg.trim().into(),
             timestamp: timestamp(),
         };
 
@@ -257,15 +277,10 @@ where
             thread.as_json_body()
         };
 
-        let response = self
-            .client
-            .post(OPENAI_URL)
-            .json(&data)
-            .send()
-            .await?
-            .error_for_status()?;
+        let response = self.client.post(OPENAI_URL).json(&data).send().await?;
 
         let stream = response
+            .error_for_status()?
             .bytes_stream()
             .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
 
@@ -319,6 +334,36 @@ where
         };
 
         self.add_thread_message(thread_id, asst_message)
+    }
+
+    pub async fn run_shell<R>(&mut self, thread_id: Uuid, reader: &mut R) -> anyhow::Result<()>
+    where
+        R: AsyncBufRead + std::marker::Unpin,
+    {
+        let mut buf = String::new();
+
+        loop {
+            reader.read_line(&mut buf).await?;
+
+            if buf.is_empty() {
+                continue;
+            }
+
+            if buf.to_lowercase().trim() == "q" {
+                break;
+            }
+
+            self.send_user_message(&buf, thread_id).await?;
+
+            if let Some(writer) = self.writer() {
+                writer.write_all("\n".as_bytes())?;
+                writer.flush()?;
+            }
+
+            buf.clear();
+        }
+
+        Ok(())
     }
 
     pub fn save_to_db(&mut self) -> anyhow::Result<()> {
