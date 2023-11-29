@@ -225,7 +225,7 @@ where
 
         let stream = response
             .bytes_stream()
-            .map(|e| e.map_err(tokio::io::Error::other));
+            .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
 
         let mut chunk_buffer = Vec::new();
         let mut message_content_buf = std::io::BufWriter::new(Vec::new());
