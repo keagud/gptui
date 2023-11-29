@@ -1,3 +1,5 @@
+use anyhow;
+use anyhow::format_err;
 use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -6,15 +8,21 @@ use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::io::{self, Stdout, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
-use anyhow;
-use anyhow::format_err;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
+
+fn timestamp() -> usize {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time moves forward")
+        .as_secs() as usize
+}
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -34,19 +42,13 @@ impl Role {
         }
     }
 
-    pub fn from_num(num: usize) -> anyhow::Result<Self > {
-
+    pub fn from_num(num: usize) -> anyhow::Result<Self> {
         match num {
             1 => Ok(Role::System),
             2 => Ok(Role::User),
             3 => Ok(Role::Assistant),
-            _ => Err(format_err!("Role value must be 1, 2, or 3"))
-
-
+            _ => Err(format_err!("Role value must be 1, 2, or 3")),
         }
-
-
-
     }
 }
 
@@ -54,6 +56,7 @@ impl Role {
 struct Message {
     role: Role,
     content: String,
+    timestamp: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -196,13 +199,18 @@ where
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
     pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<Uuid> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time moves foreward")
+            .as_secs() as usize;
+
         let messages = vec![Message {
             role: Role::System,
             content: prompt.into(),
+            timestamp,
         }];
 
         let model = "gpt-4".into();
-
         let id = Uuid::new_v4();
 
         let thread = Thread {
@@ -229,6 +237,7 @@ where
         let user_message = Message {
             role: Role::User,
             content: msg.into(),
+            timestamp: timestamp()
         };
 
         let data = {
@@ -299,6 +308,7 @@ where
         let asst_message = Message {
             role: Role::Assistant,
             content,
+            timestamp: timestamp()
         };
 
         self.add_thread_message(thread_id, asst_message)
