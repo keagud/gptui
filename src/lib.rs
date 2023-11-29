@@ -333,7 +333,11 @@ where
             timestamp: timestamp(),
         };
 
-        self.add_thread_message(thread_id, asst_message)
+        self.add_thread_message(thread_id, asst_message)?;
+
+        self.save_to_db()?;
+
+        Ok(())
     }
 
     pub async fn run_shell<R>(&mut self, thread_id: Uuid, reader: &mut R) -> anyhow::Result<()>
