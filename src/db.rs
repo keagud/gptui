@@ -8,6 +8,19 @@ use std::io;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+const SCHEMA_CMD: &str = r#"
+    CREATE TABLE thread(id VARCHAR PRIMARY KEY);
+
+    CREATE TABLE message(
+      thread_id VARCHAR,
+      role INTEGER,
+      content VARCHAR,
+      timestamp INTEGER,
+      FOREIGN KEY (thread_id) REFERENCES thread (id)
+    );
+
+"#;
+
 pub fn data_dir() -> io::Result<PathBuf> {
     let dir = BaseDirs::new()
         .ok_or(io::Error::new(
@@ -29,8 +42,8 @@ pub fn data_dir() -> io::Result<PathBuf> {
 }
 
 /// Create tables
-fn setup_table_schema(conn: &Connection) -> anyhow::Result<()> {
-    todo!();
+fn setup_table_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(SCHEMA_CMD)
 }
 
 pub fn init_db() -> anyhow::Result<Connection> {

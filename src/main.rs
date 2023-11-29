@@ -41,6 +41,5 @@ async fn run_shell() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    run_shell().await?;
     Ok(())
 }
