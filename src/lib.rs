@@ -9,6 +9,7 @@ use std::io::{self, Stdout, Write};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
+use uuid::Uuid;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -34,7 +35,7 @@ pub struct Thread {
     model: String,
 
     #[serde(skip)]
-    id: usize,
+    id: Uuid,
 }
 
 impl Thread {
@@ -124,7 +125,7 @@ where
 {
     writer: Option<T>,
     client: Client,
-    threads: HashMap<usize, Thread>,
+    threads: HashMap<Uuid, Thread>,
 }
 
 impl<T> Session<T>
@@ -157,7 +158,7 @@ where
         }
     }
 
-    fn add_thread_message(&mut self, id: usize, message: Message) -> anyhow::Result<()> {
+    fn add_thread_message(&mut self, id: Uuid, message: Message) -> anyhow::Result<()> {
         self.thread_by_id(id)
             .ok_or(anyhow::format_err!("{id} is not a thread id"))?
             .add_message(message);
@@ -167,7 +168,7 @@ where
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
-    pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<usize> {
+    pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<Uuid> {
         let messages = vec![Message {
             role: Role::System,
             content: prompt.into(),
@@ -175,7 +176,7 @@ where
 
         let model = "gpt-4".into();
 
-        let id = self.threads.values().map(|t| t.id).max().unwrap_or(0) + 1;
+        let id = Uuid::new_v4();
 
         let thread = Thread {
             messages,
@@ -191,13 +192,13 @@ where
     }
 
     /// Get a mutable reference to a thread from its id
-    pub fn thread_by_id(&mut self, id: usize) -> Option<&mut Thread> {
+    pub fn thread_by_id(&mut self, id: Uuid) -> Option<&mut Thread> {
         self.threads.get_mut(&id)
     }
 
     /// Main interface method to send a message to a thread and await a reply.
     /// The response is written to the session's writer, and saved to the thread state.
-    pub async fn send_user_message(&mut self, msg: &str, thread_id: usize) -> anyhow::Result<()> {
+    pub async fn send_user_message(&mut self, msg: &str, thread_id: Uuid) -> anyhow::Result<()> {
         let user_message = Message {
             role: Role::User,
             content: msg.into(),

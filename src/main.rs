@@ -10,7 +10,7 @@ async fn run_shell() -> anyhow::Result<()> {
     let stdout = io::stdout();
 
     let mut session = gpt::Session::new(stdout)?;
-    let thread_id = session.new_thread("You are a pirate captain. You must speak like a pirate, making sure to frequently say 'arr'.")?;
+    let thread_id = session.new_thread("You are a helpful assistant")?;
 
     let stdin = io::stdin();
     let mut buf = String::new();
