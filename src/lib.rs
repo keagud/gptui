@@ -1,3 +1,5 @@
+pub mod db;
+
 use anyhow;
 use anyhow::format_err;
 use regex::{self, RegexBuilder};
@@ -14,19 +16,22 @@ use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
+use db::init_db;
+use db::DbStore;
+
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
 
-fn timestamp() -> usize {
+fn timestamp() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time moves forward")
-        .as_secs() as usize
+        .as_millis() as f64
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
-enum Role {
+pub enum Role {
     #[default]
     User,
     System,
@@ -53,19 +58,19 @@ impl Role {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Message {
-    role: Role,
-    content: String,
-    timestamp: usize,
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+    pub timestamp: f64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct Thread {
-    messages: Vec<Message>,
-    model: String,
+    pub messages: Vec<Message>,
+    pub model: String,
 
     #[serde(skip)]
-    id: Uuid,
+    pub id: Uuid,
 }
 
 impl Thread {
@@ -76,6 +81,10 @@ impl Thread {
             .expect("At least one message")
             .content
             .as_str()
+    }
+
+    pub fn str_id(&self) -> String {
+        self.id.as_simple().to_string()
     }
 
     /// Format this thread as JSON suitible for use with the HTTP API
@@ -156,6 +165,7 @@ where
     writer: Option<T>,
     client: Client,
     threads: HashMap<Uuid, Thread>,
+    db: rusqlite::Connection,
 }
 
 impl<T> Session<T>
@@ -167,6 +177,7 @@ where
             writer: Some(writer),
             client: create_client()?,
             threads: HashMap::new(),
+            db: init_db()?,
         })
     }
 
@@ -176,6 +187,7 @@ where
             writer: Some(io::stdout()),
             client: create_client()?,
             threads: HashMap::new(),
+            db: init_db()?,
         })
     }
 
@@ -199,15 +211,10 @@ where
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
     pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<Uuid> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time moves foreward")
-            .as_secs() as usize;
-
         let messages = vec![Message {
             role: Role::System,
             content: prompt.into(),
-            timestamp,
+            timestamp: timestamp(),
         }];
 
         let model = "gpt-4".into();
@@ -237,7 +244,7 @@ where
         let user_message = Message {
             role: Role::User,
             content: msg.into(),
-            timestamp: timestamp()
+            timestamp: timestamp(),
         };
 
         let data = {
@@ -308,9 +315,26 @@ where
         let asst_message = Message {
             role: Role::Assistant,
             content,
-            timestamp: timestamp()
+            timestamp: timestamp(),
         };
 
         self.add_thread_message(thread_id, asst_message)
+    }
+
+    pub fn save_to_db(&mut self) -> anyhow::Result<()> {
+        for thread in self.threads.values() {
+            thread.to_db(&mut self.db)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<T> Drop for Session<T>
+where
+    T: Write,
+{
+    fn drop(&mut self) {
+        self.save_to_db().unwrap();
     }
 }

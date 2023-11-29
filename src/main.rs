@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 
-pub mod db;
 use std::io::{self, Write};
-use tokio::io::AsyncBufReadExt;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
