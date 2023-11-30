@@ -1,7 +1,7 @@
 #![allow(dead_code, unused)]
 
 use crate::Session;
-use anyhow;
+use anyhow::{anyhow, format_err};
 use crossterm::{
     event::{
         self, Event,
@@ -13,9 +13,17 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    prelude::{CrosstermBackend, Frame, Terminal},
+    prelude::{CrosstermBackend as Backend, Frame, Terminal},
     widgets::Paragraph,
 };
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+};
+
+use futures::{FutureExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, PartialEq, Eq, Default)]
 enum Screen {
@@ -169,14 +177,38 @@ enum Action {
     CopyAction(CopyAction),
 }
 
-#[derive(Debug, Default)]
-pub struct App {
-    screen: Screen,
+#[derive(Debug)]
+pub struct Tui {
+    terminal: Terminal<Backend<std::io::Stderr>>,
+    event_rx: UnboundedReceiver<Event>,
+    event_tx: UnboundedSender<Event>,
+    cancellation_token: CancellationToken,
+    frame_rate: f64,
+    tick_rate: f64,
+    mouse: bool,
 }
 
-impl App {
-    pub fn new() -> Self {
-        Self::default()
+impl Tui {
+    pub fn new() -> anyhow::Result<Self> {
+        let tick_rate = 4.0;
+        let frame_rate = 60.0;
+
+        let terminal = ratatui::Terminal::new(Backend::new(std::io::stderr()))?;
+
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let cancellation_token = CancellationToken::new();
+
+        let task = tokio::spawn(async {});
+
+        Ok(Self {
+            tick_rate,
+            frame_rate,
+            terminal,
+            event_tx,
+            event_rx,
+            cancellation_token,
+            mouse: false,
+        })
     }
 
     fn startup(&self) -> anyhow::Result<()> {
