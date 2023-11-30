@@ -1,4 +1,5 @@
 pub mod db;
+pub mod tui;
 
 use anyhow::format_err;
 use regex::{self, RegexBuilder};

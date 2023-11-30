@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use gpt::{Role, Session};
+use gpt::{tui, Role, Session};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -42,6 +42,10 @@ async fn run_shell() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tui::test_tui()
+}
+
+async fn _main() -> anyhow::Result<()> {
     let mut session = Session::new_stdout()?;
     session.load_threads()?;
 
