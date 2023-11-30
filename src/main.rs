@@ -2,13 +2,7 @@
 
 use std::io::{self, Write};
 
-use ctrlc;
 use gpt::{Role, Session};
-use tokio::io::stdin;
-
-use signal_hook;
-use signal_hook_tokio;
-use tokio::sync::mpsc;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;

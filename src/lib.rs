@@ -1,6 +1,5 @@
 pub mod db;
 
-use anyhow;
 use anyhow::format_err;
 use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -9,16 +8,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::io::{self, Read, Stdout, Write};
+use std::io::{self, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::AsyncRead;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
-use db::init_db;
-use db::DbStore;
+use db::{init_db, DbStore};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -27,7 +24,7 @@ fn timestamp() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time moves forward")
-        .as_millis() as f64
+        .as_secs_f64()
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
