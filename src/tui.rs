@@ -105,7 +105,28 @@ impl FromKeyEvent for ChatAction {
 
 impl FromKeyEvent for ListAction {
     fn from_key_event(key: KeyEvent) -> Option<Self> {
-        todo!();
+        match assure_is_press(key)? {
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => Some(ListAction::EnterChat),
+
+            KeyEvent {
+                code: KeyCode::Char('n'),
+                ..
+            } => Some(ListAction::NewChat),
+
+            KeyEvent {
+                code: KeyCode::Up, ..
+            } => Some(ListAction::SelectionUp),
+
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            } => Some(ListAction::SelectionDown),
+
+            _ => None,
+        }
     }
 }
 
