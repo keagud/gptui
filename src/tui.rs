@@ -52,7 +52,8 @@ enum ListAction {
 }
 
 enum CopyAction {
-    CopyCodeBlock(u32),
+    InputCodeBlockDigit(u8),
+    SubmitCopySelection,
     ExitCopyMode,
     ScrollUp,
     ScrollDown,
@@ -62,9 +63,7 @@ impl FromKeyEvent for ChatAction {
     fn from_key_event(key: KeyEvent) -> Option<Self> {
         use ChatAction::*;
 
-        let key = assure_is_press(key)?;
-
-        match key {
+        match assure_is_press(key)? {
             KeyEvent {
                 code: KeyCode::Up,
                 modifiers: KeyModifiers::CONTROL,
@@ -132,7 +131,33 @@ impl FromKeyEvent for ListAction {
 
 impl FromKeyEvent for CopyAction {
     fn from_key_event(key: KeyEvent) -> Option<Self> {
-        todo!();
+        use CopyAction::*;
+        match assure_is_press(key)? {
+            KeyEvent {
+                code: KeyCode::Char(c),
+                ..
+            } if c.is_digit(10) => c.to_digit(10).map(|d| InputCodeBlockDigit(d as u8)),
+
+            KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            } => Some(SubmitCopySelection),
+
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => Some(ExitCopyMode),
+
+            KeyEvent {
+                code: KeyCode::Up, ..
+            } => Some(ScrollUp),
+
+            KeyEvent {
+                code: KeyCode::Down,
+                ..
+            } => Some(ScrollDown),
+
+            _ => None,
+        }
     }
 }
 
