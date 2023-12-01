@@ -4,12 +4,58 @@ use crossterm::event::{
     KeyCode::{self},
     KeyEvent, KeyEventKind, KeyModifiers,
 };
+use ratatui::Frame;
+
+use crate::tui;
 
 #[derive(Debug, PartialEq, Eq, Default)]
 enum Screen {
     Chat,
     #[default]
     List,
+}
+
+pub struct App {
+    screen: Screen,
+    should_quit: bool,
+}
+
+impl App {
+    fn ui(&self, frame: &mut Frame) {
+        todo!();
+    }
+
+    fn update(&mut self, action: AppEvent) -> Option<AppEvent> {
+        todo!();
+    }
+
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        let mut tui = tui::Tui::new()?;
+
+        tui.enter()?;
+
+        loop {
+            tui.draw(|f| {
+                self.ui(f);
+            })?;
+
+            if let Some(evt) = tui.next().await {
+                let mut maybe_action = parse_event(evt);
+
+                while let Some(action) = maybe_action {
+                    maybe_action = self.update(action);
+                }
+            };
+
+            if self.should_quit {
+                break;
+            }
+        }
+
+        tui.exit()?;
+
+        Ok(())
+    }
 }
 
 fn assure_is_press(key_event: KeyEvent) -> Option<KeyEvent> {
@@ -149,14 +195,6 @@ impl FromKeyEvent for CopyAction {
     }
 }
 
-pub enum TermEvent {
-    CrosstermEvent(crossterm::event::Event),
-    Error(Box<dyn std::error::Error + Send + Sync>),
-    Tick,
-    Render,
-    Init,
-}
-
 enum AppEvent {
     Tick,
     Quit,
@@ -168,6 +206,10 @@ enum AppEvent {
     CopyAction(CopyAction),
 }
 
-fn parse_event(_event: crossterm::event::Event) -> Option<AppEvent> {
+fn parse_event(_event: tui::TermEvent) -> Option<AppEvent> {
     todo!();
+}
+
+pub fn app_test() -> anyhow::Result<()> {
+    Ok(())
 }
