@@ -1,11 +1,15 @@
 #![allow(dead_code)]
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use gpt::{tui, Role, Session};
+use lazy_static::lazy_static;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
+
+
 
 async fn run_shell() -> anyhow::Result<()> {
     let stdout = io::stdout();
