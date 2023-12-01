@@ -13,6 +13,7 @@ enum Screen {
     Chat,
     #[default]
     List,
+    Copy,
 }
 
 pub struct App {
@@ -22,11 +23,38 @@ pub struct App {
 
 impl App {
     fn ui(&self, frame: &mut Frame) {
-        todo!();
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(format!("{:?}", self.screen)),
+            frame.size(),
+        );
     }
 
     fn update(&mut self, action: AppEvent) -> Option<AppEvent> {
         todo!();
+    }
+
+    fn parse_event(&self, event: tui::TermEvent) -> Option<AppEvent> {
+        use Screen::*;
+
+        match event {
+            tui::TermEvent::Error(e) => Some(AppEvent::Error(e)),
+            tui::TermEvent::Init => Some(AppEvent::Init),
+            tui::TermEvent::Tick => Some(AppEvent::Tick),
+            tui::TermEvent::Render => Some(AppEvent::Render),
+
+            tui::TermEvent::CrosstermEvent(crossterm::event::Event::Key(
+                key @ KeyEvent {
+                    kind: KeyEventKind::Press,
+                    ..
+                },
+            )) => match self.screen {
+                Screen::List => ListAction::from_key_event(key).map(|a| AppEvent::ListAction(a)),
+                Screen::Chat => ChatAction::from_key_event(key).map(|a| AppEvent::ChatAction(a)),
+                Screen::Copy => CopyAction::from_key_event(key).map(|a| AppEvent::CopyAction(a)),
+            },
+
+            _ => None,
+        }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
@@ -40,7 +68,7 @@ impl App {
             })?;
 
             if let Some(evt) = tui.next().await {
-                let mut maybe_action = parse_event(evt);
+                let mut maybe_action = self.parse_event(evt);
 
                 while let Some(action) = maybe_action {
                     maybe_action = self.update(action);
@@ -204,10 +232,6 @@ enum AppEvent {
     ChatAction(ChatAction),
     ListAction(ListAction),
     CopyAction(CopyAction),
-}
-
-fn parse_event(_event: tui::TermEvent) -> Option<AppEvent> {
-    todo!();
 }
 
 pub fn app_test() -> anyhow::Result<()> {
