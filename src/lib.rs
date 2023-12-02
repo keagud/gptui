@@ -1,6 +1,6 @@
 mod db;
 
-mod app;
+pub mod app;
 pub mod tui;
 
 use anyhow::format_err;

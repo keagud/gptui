@@ -9,6 +9,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+use anyhow::anyhow;
 use futures::{FutureExt, StreamExt};
 
 use std::ops::{Deref, DerefMut};
@@ -20,6 +21,17 @@ pub enum TermEvent {
     Tick,
     Render,
     Init,
+}
+
+impl TermEvent {
+    pub fn raise_err(&self) -> anyhow::Result<()> {
+        if let Self::Error(e) = self {
+            // TODO this is a bandaid hack
+            Err(anyhow::format_err!("{e}"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug)]

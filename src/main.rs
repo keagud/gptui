@@ -2,6 +2,7 @@
 
 use std::io::{self, Write};
 
+use gpt::app;
 use gpt::{tui, Role, Session};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -42,7 +43,9 @@ async fn run_shell() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tui::test_tui()
+    app::app_test().await?;
+
+    Ok(())
 }
 
 async fn _main() -> anyhow::Result<()> {
