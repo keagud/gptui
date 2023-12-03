@@ -288,7 +288,10 @@ impl App {
             })?;
 
             if let Some(evt) = tui.next().await {
-                self.update(evt)?;
+                match evt {
+                    TermEvent::Quit => self.should_quit = true,
+                    _ => self.update(evt)?,
+                }
             };
 
             if self.should_quit {

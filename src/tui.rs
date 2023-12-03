@@ -1,6 +1,9 @@
 use crossterm::{
     cursor,
-    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyCode, KeyEvent, KeyModifiers,
+    },
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::{CrosstermBackend as Backend, Terminal};
@@ -9,7 +12,6 @@ use tokio::{
     task::JoinHandle,
 };
 
-use anyhow::anyhow;
 use futures::{FutureExt, StreamExt};
 
 use std::ops::{Deref, DerefMut};
@@ -21,6 +23,7 @@ pub enum TermEvent {
     Tick,
     Render,
     Init,
+    Quit,
 }
 
 impl TermEvent {
@@ -105,11 +108,24 @@ impl Tui {
 
                     _ = _cancellation_token.cancelled() => {break;}
 
+
                     maybe_event = crossterm_event => {
 
                         match maybe_event {
                             Some(Ok(evt)) => {
+                                // catch ctrl-c at a lower level so it's never missed
+                                if let crossterm::event::Event::Key( KeyEvent {
+                                    code: KeyCode::Char('c') | KeyCode::Char('d'),
+                                    modifiers: KeyModifiers::CONTROL,
+                                    ..
+                                }) = evt {
+                                    _event_tx.send(TermEvent::Quit).unwrap();
+
+                                } else {
+                                    // everything else gets delegated to the app logic
                                 _event_tx.send(TermEvent::CrosstermEvent(evt)).unwrap();
+                                }
+
                             },
                             Some(Err(e)) => {
                                 _event_tx.send(TermEvent::Error(e.into())).unwrap();
