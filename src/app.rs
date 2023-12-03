@@ -86,7 +86,7 @@ impl AppMode for ChatMode {
 
                 KeyEvent {
                     code: KeyCode::Char(' '),
-                    modifiers: KeyModifiers::CONTROL,
+                    modifiers: KeyModifiers::ALT,
                     ..
                 } => Some(EnterCopyMode),
 
@@ -115,14 +115,14 @@ impl AppMode for ChatMode {
     }
 
     fn draw_screen(app: &App, frame: &mut Frame) {
-        frame.render_widget(
-            Paragraph::new(format!("Counter: {}", app.count)),
-            frame.size(),
-        )
+        frame.render_widget(Paragraph::new(format!("Chat mode")), frame.size())
     }
 
     fn update(app: &mut App, action: Self::Action) {
         match action {
+            ChatAction::EnterCopyMode => {
+                app.screen = Screen::Copy;
+            }
             ChatAction::TypeChar('j') => {
                 app.count -= 1;
             }
@@ -131,7 +131,7 @@ impl AppMode for ChatMode {
                 app.count += 1;
             }
 
-            ChatAction::ExitChat => app.should_quit = true,
+            ChatAction::ExitChat => app.screen = Screen::List,
             _ => {}
         }
     }
@@ -153,7 +153,7 @@ impl AppMode for ListMode {
     }
 
     fn draw_screen(app: &App, frame: &mut Frame) {
-        placeholder_draw!(app, frame)
+        frame.render_widget(Paragraph::new("List Mode"), frame.size());
     }
 
     fn parse_event(event: tui::TermEvent) -> anyhow::Result<Option<Self::Action>> {
@@ -246,11 +246,14 @@ impl AppMode for CopyMode {
     }
 
     fn draw_screen(app: &App, frame: &mut Frame) {
-        placeholder_draw!(app, frame);
+        frame.render_widget(Paragraph::new("Copy Mode"), frame.size());
     }
 
     fn update(app: &mut App, action: Self::Action) {
-        ()
+        match action {
+            CopyAction::ExitCopyMode => app.screen = Screen::Chat,
+            _ => (),
+        }
     }
 }
 
