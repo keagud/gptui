@@ -4,6 +4,7 @@ pub mod app;
 pub mod tui;
 
 use anyhow::format_err;
+use futures::{stream, Stream, StreamExt};
 use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -14,7 +15,6 @@ use std::collections::HashMap;
 use std::io::{self, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
-use tokio_stream::StreamExt;
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
@@ -252,6 +252,64 @@ where
     /// Get a mutable reference to a thread from its id
     pub fn thread_by_id(&mut self, id: Uuid) -> Option<&mut Thread> {
         self.threads.get_mut(&id)
+    }
+
+    pub async fn stream_user_message(
+        &mut self,
+        msg: &str,
+        thread_id: Uuid,
+    ) -> anyhow::Result<impl Stream<Item = Result<String, Box<dyn std::error::Error + Send + Sync>>>>
+    {
+        // if msg.trim().is_empty() {
+        //     return None;
+        // }
+
+        let user_message = Message {
+            role: Role::User,
+            content: msg.trim().into(),
+            timestamp: timestamp(),
+        };
+
+        let data = {
+            let thread = self
+                .thread_by_id(thread_id)
+                .ok_or(anyhow::format_err!("No thread found with id: {thread_id}"))?;
+
+            thread.add_message(user_message);
+
+            thread.as_json_body()
+        };
+
+        let response = self.client.post(OPENAI_URL).json(&data).send().await?;
+
+        let stream = response
+            .error_for_status()?
+            .bytes_stream()
+            .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
+
+        let mut message_content_buf = std::io::BufWriter::new(Vec::new());
+        let mut stream_reader = StreamReader::new(stream);
+
+        let buffered_reader = BufReader::new(&mut stream_reader);
+        let mut lines = buffered_reader.lines();
+
+        // regex to remove the 'data: ' prefix on the chunks
+        let pat = RegexBuilder::new(r"^\s*data:")
+            .multi_line(true)
+            .build()
+            .unwrap();
+
+        Ok(stream::unfold((), move |_| async move {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    // let trimmed = &pat.replace(&line, "");
+                    Some((Ok(line.to_string()), ()))
+                }
+                Ok(None) => None,
+
+                Err(e) => Some((Err(e.into()), ())),
+            }
+        }))
     }
 
     /// Main interface method to send a message to a thread and await a reply.

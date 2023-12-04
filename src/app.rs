@@ -4,14 +4,25 @@ use crossterm::event::{
     KeyCode::{self},
     KeyEvent, KeyEventKind, KeyModifiers,
 };
-use ratatui::{widgets::Paragraph, Frame};
+use ratatui::{
+    layout::{self, Constraint, Layout},
+    widgets::Paragraph,
+    Frame,
+};
 
-use crate::tui::{self, TermEvent};
+use crate::{
+    tui::{self, TermEvent},
+    Session,
+};
 use anyhow::anyhow;
-use std::{marker::PhantomData, ops::Deref};
+use std::{default, marker::PhantomData, ops::Deref};
 
-#[derive(Debug, PartialEq, Eq)]
+use crate::{Message, Role, Thread};
+use tui_textarea::TextArea;
+
+#[derive(Debug, PartialEq, Eq, Default)]
 enum Screen {
+    #[default]
     Chat,
     List,
     Copy,
@@ -41,7 +52,7 @@ macro_rules! placeholder_draw {
     };
 }
 
-trait AppMode {
+trait AppMode: Default {
     ///An enum type representing higher-level operations in this mode
     type Action;
 
@@ -53,12 +64,18 @@ trait AppMode {
 
     /// Alter the app's state according to the action
     fn update(app: &mut App, action: Self::Action);
+
+    fn layout(&self, app: App) -> Layout;
+
+    fn create(app: App) -> Self;
 }
 
-#[derive(PartialEq, Eq, Debug)]
-struct ChatMode();
+#[derive(Debug, Default)]
+struct ChatMode<'a> {
+    input_box: TextArea<'a>,
+}
 
-impl AppMode for ChatMode {
+impl<'a> AppMode for ChatMode<'a> {
     type Action = ChatAction;
     fn parse_event(event: tui::TermEvent) -> anyhow::Result<Option<Self::Action>> {
         use ChatAction::*;
@@ -115,6 +132,11 @@ impl AppMode for ChatMode {
     }
 
     fn draw_screen(app: &App, frame: &mut Frame) {
+        let layout = Layout::default()
+            .direction(layout::Direction::Vertical)
+            .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
+            .split(frame.size());
+
         frame.render_widget(Paragraph::new(format!("Chat mode")), frame.size())
     }
 
@@ -135,9 +157,18 @@ impl AppMode for ChatMode {
             _ => {}
         }
     }
+    fn layout(&self, app: App) -> Layout {
+        Layout::default()
+            .direction(layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(10)])
+    }
+
+    fn create(app: App) -> Self {
+        todo!()
+    }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Default)]
 struct ListMode();
 impl AppMode for ListMode {
     type Action = ListAction;
@@ -194,9 +225,16 @@ impl AppMode for ListMode {
 
         Ok(result)
     }
+    fn layout(&self, app: App) -> Layout {
+        todo!()
+    }
+
+    fn create(app: App) -> Self {
+        todo!()
+    }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Default)]
 struct CopyMode();
 impl AppMode for CopyMode {
     type Action = CopyAction;
@@ -255,12 +293,21 @@ impl AppMode for CopyMode {
             _ => (),
         }
     }
+    fn layout(&self, app: App) -> Layout {
+        todo!();
+    }
+
+    fn create(app: App) -> Self {
+        todo!()
+    }
 }
 
+#[derive(Default)]
 pub struct App {
     screen: Screen,
     should_quit: bool,
     count: i32,
+    message_content: String,
 }
 
 impl App {
@@ -347,11 +394,7 @@ enum Action {
 }
 
 pub async fn app_test() -> anyhow::Result<()> {
-    let mut app = App {
-        screen: Screen::Chat,
-        should_quit: false,
-        count: 0,
-    };
+    let mut app = App::default();
     app.run().await?;
     Ok(())
 }
