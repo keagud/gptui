@@ -4,7 +4,9 @@ pub mod app;
 pub mod tui;
 
 use anyhow::format_err;
+use async_stream;
 use futures::{stream, Stream, StreamExt};
+use itertools::Itertools;
 use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -152,6 +154,12 @@ struct CompletionChunk {
     choices: Vec<CompletionChoice>,
 }
 
+// #[derive(Serialize, Deserialize, Debug)]
+// pub struct CompletionChunk {
+//     data: CompletionData,
+//     finish_reason: String,
+// }
+
 impl CompletionChunk {
     pub fn token(&self) -> Option<String> {
         self.choices
@@ -258,8 +266,7 @@ where
         &mut self,
         msg: &str,
         thread_id: Uuid,
-    ) -> anyhow::Result<impl Stream<Item = Result<String, Box<dyn std::error::Error + Send + Sync>>>>
-    {
+    ) -> anyhow::Result<impl Stream<Item = Option<anyhow::Result<String>>>> {
         // if msg.trim().is_empty() {
         //     return None;
         // }
@@ -287,11 +294,12 @@ where
             .bytes_stream()
             .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
 
-        let mut message_content_buf = std::io::BufWriter::new(Vec::new());
-        let mut stream_reader = StreamReader::new(stream);
+        //        let mut stream_reader = StreamReader::new(stream);
 
-        let buffered_reader = BufReader::new(&mut stream_reader);
-        let mut lines = buffered_reader.lines();
+        let mut buf = String::new();
+
+        //       let buffered_reader = BufReader::new(&mut stream_reader);
+        //      let mut lines = buffered_reader.lines();
 
         // regex to remove the 'data: ' prefix on the chunks
         let pat = RegexBuilder::new(r"^\s*data:")
@@ -299,17 +307,53 @@ where
             .build()
             .unwrap();
 
-        Ok(stream::unfold((), move |_| async move {
-            match lines.next_line().await {
-                Ok(Some(line)) => {
-                    // let trimmed = &pat.replace(&line, "");
-                    Some((Ok(line.to_string()), ()))
-                }
-                Ok(None) => None,
+        let _stream = async_stream::stream! {
 
-                Err(e) => Some((Err(e.into()), ())),
+            for await chunk_bytes in stream {
+
+                match chunk_bytes
+                    .map_err(|e| anyhow::anyhow!(e))
+                    .and_then(|c| String::from_utf8(c.into())
+                    .map_err(|e| anyhow::anyhow!(e))) {
+
+                    Err(e) => { yield Some(Err(e)); }
+
+                    Ok(chunk) => {
+
+                            let trimmed = pat.replace_all(&chunk.trim(), "").to_string().lines().join(",");
+
+                        match serde_json::from_str::<Vec<CompletionChunk>>(dbg!(&format!("[ {} ]", &trimmed))) {
+
+                            Ok(full_chunk) => {
+
+                                    for line in full_chunk.iter() {
+                                    if let Some(token) = line.token() {
+                                        yield Some(Ok(token.clone()));
+                                    }
+                                    }
+                            }
+
+                            Err(e) if e.is_eof() => {
+                                continue;
+
+                            }
+
+                            Err(e) => {
+                                buf.clear();
+                                yield Some(Err(anyhow::anyhow!(e)));
+
+                            }
+
+                        }
+
+                }
+
             }
-        }))
+
+            }
+
+        };
+        Ok(_stream)
     }
 
     /// Main interface method to send a message to a thread and await a reply.

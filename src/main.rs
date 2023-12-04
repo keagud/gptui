@@ -5,6 +5,9 @@ use std::io::{self, Write};
 use gpt::app;
 use gpt::{tui, Role, Session};
 
+use futures::{stream, Stream, StreamExt};
+use futures_util::pin_mut;
+
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
 
@@ -41,14 +44,14 @@ async fn run_shell() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn _main() -> anyhow::Result<()> {
     app::app_test().await?;
 
     Ok(())
 }
 
-async fn _main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let mut session = Session::new_stdout()?;
     session.load_threads()?;
 
@@ -66,9 +69,19 @@ async fn _main() -> anyhow::Result<()> {
 
     let thread_id = session.new_thread("You are a helpful assistant")?;
 
-    let mut async_stdin = tokio::io::BufReader::new(tokio::io::stdin());
+    let mut stream = session
+        .stream_user_message(
+            "Write a poem about the Rust programming langauge in the style of Edgar Allen Poe",
+            thread_id,
+        )
+        .await?;
 
-    session.run_shell(thread_id, &mut async_stdin).await?;
+    pin_mut!(stream);
+
+    while let Some(s) = stream.next().await.flatten() {
+        print!("{:?}", s);
+        io::stdout().flush()?;
+    }
 
     session.save_to_db()?;
 
