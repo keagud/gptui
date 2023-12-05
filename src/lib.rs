@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
-use std::io::{self, Stdout, Write};
+use std::io::{self, sink, Sink, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, path};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -102,7 +103,7 @@ impl Thread {
                 .collect::<Vec<Value>>(),
 
             "stream" : true,
-            "max_tokens": MAX_TOKENS
+           // "max_tokens": MAX_TOKENS
         })
     }
 
@@ -179,11 +180,90 @@ where
     db: rusqlite::Connection,
 }
 
+fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>, Option<String>)> {
+    let mut valid_chunks = Vec::new();
+
+    let mut remainder = None;
+
+    let input_lines = input
+        .lines()
+        .map(|ln| ln.trim().trim_start_matches("data:").trim())
+        .filter(|ln| !ln.is_empty())
+        .collect_vec();
+
+    for (i, line) in input_lines.iter().enumerate() {
+        match serde_json::from_str::<CompletionChunk>(line) {
+            Ok(chunk) => valid_chunks.push(chunk),
+            Err(e) if e.is_eof() => {
+                remainder = Some(input_lines[i..].join("\n"));
+
+                break;
+            }
+            Err(e) if e.is_syntax() && *line == "[DONE]" => break,
+
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        }
+    }
+
+    let return_chunks = if valid_chunks.is_empty() {
+        None
+    } else {
+        Some(valid_chunks)
+    };
+
+    Ok((return_chunks, remainder))
+}
+
+#[cfg(test)]
+mod test_parser {
+    use super::*;
+
+    #[test]
+    fn test_parse_chunks() {
+        let data = r#"
+         data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":" today"},"finish_reason":null}]}
+{"id":"chatcmpl-123","object":"chat.completion.chunk", "c
+        "#;
+
+        let (parsed, remaining) = try_parse_chunks(data).unwrap();
+
+        let parsed = parsed.unwrap();
+        let remaining = remaining.unwrap();
+
+        assert_eq!(
+            remaining.as_str(),
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk", "c"#
+        );
+
+        for (token, expected) in parsed
+            .into_iter()
+            .map(|chunk| chunk.token())
+            .zip(["", "!", " today"].into_iter())
+        {
+            assert!(token.is_some());
+            assert_eq!(token.unwrap().as_str(), expected);
+        }
+    }
+}
+
 impl Session<Stdout> {
     /// Create a new Session that will write its output to stdout
     pub fn new_stdout() -> anyhow::Result<Session<Stdout>> {
         Ok(Session {
             writer: Some(io::stdout()),
+            client: create_client()?,
+            threads: HashMap::new(),
+            db: init_db()?,
+        })
+    }
+}
+
+impl Session<Sink> {
+    pub fn new_dummy() -> anyhow::Result<Session<Sink>> {
+        Ok(Session {
+            writer: Some(sink()),
             client: create_client()?,
             threads: HashMap::new(),
             db: init_db()?,
@@ -266,7 +346,7 @@ where
         &mut self,
         msg: &str,
         thread_id: Uuid,
-    ) -> anyhow::Result<impl Stream<Item = Option<anyhow::Result<String>>>> {
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<Option<String>>>> {
         // if msg.trim().is_empty() {
         //     return None;
         // }
@@ -309,50 +389,37 @@ where
 
         let _stream = async_stream::stream! {
 
-            for await chunk_bytes in stream {
+        for await chunk_bytes in stream {
 
-                match chunk_bytes
-                    .map_err(|e| anyhow::anyhow!(e))
-                    .and_then(|c| String::from_utf8(c.into())
-                    .map_err(|e| anyhow::anyhow!(e))) {
+            let chunk = chunk_bytes
+                .map_err(|e| anyhow::anyhow!(e))
+                .and_then(|c| String::from_utf8(c.into())
+                .map_err(|e| anyhow::anyhow!(e)))?;
 
-                    Err(e) => { yield Some(Err(e)); }
 
-                    Ok(chunk) => {
+                buf.push_str(&chunk);
 
-                            let trimmed = pat.replace_all(&chunk.trim(), "").to_string().lines().join(",");
+                let (parsed, remainder) = try_parse_chunks(&buf)?;
 
-                        match serde_json::from_str::<Vec<CompletionChunk>>(dbg!(&format!("[ {} ]", &trimmed))) {
-
-                            Ok(full_chunk) => {
-
-                                    for line in full_chunk.iter() {
-                                    if let Some(token) = line.token() {
-                                        yield Some(Ok(token.clone()));
-                                    }
-                                    }
-                            }
-
-                            Err(e) if e.is_eof() => {
-                                continue;
-
-                            }
-
-                            Err(e) => {
-                                buf.clear();
-                                yield Some(Err(anyhow::anyhow!(e)));
-
-                            }
-
-                        }
+                if let Some(remainder) = remainder {
+                    buf = remainder;
+                } else {
+                    buf.clear();
 
                 }
 
-            }
+                if let Some(chunks) = parsed {
 
-            }
+                    for token in chunks.iter().map(|chunk| chunk.token()) {
+                            yield Ok(token);
+
+                    }
+                }
+
+        }
 
         };
+
         Ok(_stream)
     }
 

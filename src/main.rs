@@ -52,7 +52,7 @@ async fn _main() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut session = Session::new_stdout()?;
+    let mut session = Session::new_dummy()?;
     session.load_threads()?;
 
     for thread in session.threads.values() {
@@ -71,16 +71,23 @@ async fn main() -> anyhow::Result<()> {
 
     let mut stream = session
         .stream_user_message(
-            "Write a poem about the Rust programming langauge in the style of Edgar Allen Poe",
+            "Write a short poem about the Rust programming langauge in the Walt Whitman. Limit your poem to 10 lines at most.",
             thread_id,
         )
         .await?;
 
     pin_mut!(stream);
 
-    while let Some(s) = stream.next().await.flatten() {
-        print!("{:?}", s);
-        io::stdout().flush()?;
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(Some(s)) => {
+                io::stdout().write(s.as_bytes())?;
+                io::stdout().flush()?;
+            }
+
+            Err(e) => println!("{:?}", e),
+            _ => (),
+        }
     }
 
     session.save_to_db()?;
