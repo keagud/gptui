@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod db;
 
 pub mod app;
@@ -6,8 +7,8 @@ pub mod tui;
 use anyhow::format_err;
 
 use futures::{Stream, StreamExt};
+use futures_util::pin_mut;
 use itertools::Itertools;
-use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -155,12 +156,6 @@ struct CompletionChunk {
     choices: Vec<CompletionChoice>,
 }
 
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct CompletionChunk {
-//     data: CompletionData,
-//     finish_reason: String,
-// }
-
 impl CompletionChunk {
     pub fn token(&self) -> Option<String> {
         self.choices
@@ -174,7 +169,7 @@ pub struct Session<T>
 where
     T: Write,
 {
-    writer: Option<T>,
+    writer: T,
     client: Client,
     pub threads: HashMap<Uuid, Thread>,
     db: rusqlite::Connection,
@@ -251,23 +246,14 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190
 impl Session<Stdout> {
     /// Create a new Session that will write its output to stdout
     pub fn new_stdout() -> anyhow::Result<Session<Stdout>> {
-        Ok(Session {
-            writer: Some(io::stdout()),
-            client: create_client()?,
-            threads: HashMap::new(),
-            db: init_db()?,
-        })
+        Self::new(io::stdout())
     }
 }
 
 impl Session<Sink> {
+    /// Create a new Session that will write to a dummy sink (no visible output)
     pub fn new_dummy() -> anyhow::Result<Session<Sink>> {
-        Ok(Session {
-            writer: Some(sink()),
-            client: create_client()?,
-            threads: HashMap::new(),
-            db: init_db()?,
-        })
+        Self::new(sink())
     }
 }
 
@@ -277,7 +263,7 @@ where
 {
     pub fn new(writer: T) -> anyhow::Result<Self> {
         Ok(Self {
-            writer: Some(writer),
+            writer,
             client: create_client()?,
             threads: HashMap::new(),
             db: init_db()?,
@@ -295,13 +281,15 @@ where
         Ok(())
     }
 
-    pub fn writer(&mut self) -> Option<&mut T> {
-        if let Some(out_writer) = self.writer.as_mut() {
-            let ptr = out_writer.borrow_mut();
-            Some(ptr)
-        } else {
-            None
-        }
+    fn writer(&mut self) -> &mut T {
+        &mut self.writer
+    }
+
+    fn write_all_flushed(&mut self, buf: impl AsRef<[u8]>) -> io::Result<()> {
+        self.writer.write_all(buf.as_ref())?;
+        self.writer.flush()?;
+
+        Ok(())
     }
 
     fn add_thread_message(&mut self, id: Uuid, message: Message) -> anyhow::Result<()> {
@@ -374,139 +362,48 @@ where
             .bytes_stream()
             .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
 
-        //        let mut stream_reader = StreamReader::new(stream);
-
         let mut buf = String::new();
-
-        //       let buffered_reader = BufReader::new(&mut stream_reader);
-        //      let mut lines = buffered_reader.lines();
-
-        // regex to remove the 'data: ' prefix on the chunks
-        let _pat = RegexBuilder::new(r"^\s*data:")
-            .multi_line(true)
-            .build()
-            .unwrap();
 
         let _stream = async_stream::stream! {
 
-        for await chunk_bytes in stream {
+            for await chunk_bytes in stream {
 
-            let chunk = chunk_bytes
-                .map_err(|e| anyhow::anyhow!(e))
-                .and_then(|c| String::from_utf8(c.into())
-                .map_err(|e| anyhow::anyhow!(e)))?;
+                let chunk = chunk_bytes
+                    .map_err(|e| anyhow::anyhow!(e))
+                    .and_then(|c| String::from_utf8(c.into())
+                    .map_err(|e| anyhow::anyhow!(e)))?;
 
 
-                buf.push_str(&chunk);
+                    buf.push_str(&chunk);
 
-                let (parsed, remainder) = try_parse_chunks(&buf)?;
+                    let (parsed, remainder) = try_parse_chunks(&buf)?;
 
-                if let Some(remainder) = remainder {
-                    buf = remainder;
-                } else {
                     buf.clear();
 
-                }
-
-                if let Some(chunks) = parsed {
-
-                    for token in chunks.iter().map(|chunk| chunk.token()) {
-                            yield Ok(token);
-
+                    if let Some(remainder) = remainder {
+                        buf.push_str(&remainder);
                     }
-                }
 
-        }
+
+                    if let Some(chunks) = parsed {
+
+                        for chunk in chunks.iter() {
+                                yield Ok(chunk.token());
+
+                        }
+                    }
+
+            }
 
         };
 
         Ok(_stream)
     }
 
-    /// Main interface method to send a message to a thread and await a reply.
-    /// The response is written to the session's writer, and saved to the thread state.
-    pub async fn send_user_message(&mut self, msg: &str, thread_id: Uuid) -> anyhow::Result<()> {
-        if msg.trim().is_empty() {
-            return Ok(());
-        }
+    pub async fn run_shell_stdin(&mut self, thread_id: Uuid) -> anyhow::Result<()> {
+        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
 
-        let user_message = Message {
-            role: Role::User,
-            content: msg.trim().into(),
-            timestamp: timestamp(),
-        };
-
-        let data = {
-            let thread = self
-                .thread_by_id(thread_id)
-                .ok_or(anyhow::format_err!("No thread found with id: {thread_id}"))?;
-
-            thread.add_message(user_message);
-
-            thread.as_json_body()
-        };
-
-        let response = self.client.post(OPENAI_URL).json(&data).send().await?;
-
-        let stream = response
-            .error_for_status()?
-            .bytes_stream()
-            .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
-
-        let mut chunk_buffer = Vec::new();
-        let mut message_content_buf = std::io::BufWriter::new(Vec::new());
-        let mut stream_reader = StreamReader::new(stream);
-
-        let buffered_reader = BufReader::new(&mut stream_reader);
-        let mut lines = buffered_reader.lines();
-
-        // regex to remove the 'data: ' prefix on the chunks
-        let pat = RegexBuilder::new(r"^\s*data:")
-            .multi_line(true)
-            .build()
-            .unwrap();
-
-        while let Some(line) = lines.next_line().await? {
-            let line = pat.replace(line.trim(), "");
-            if !line.is_empty() {
-                match serde_json::from_str::<Value>(&line) {
-                    Ok(chunk) => {
-                        let completion_chunk: CompletionChunk = serde_json::from_value(chunk)?;
-
-                        if let Some(token) = completion_chunk.token() {
-                            if let Some(output_writer) = self.writer() {
-                                output_writer.write_all(token.as_bytes())?;
-                                output_writer.flush()?;
-                            }
-
-                            message_content_buf.write_all(token.as_bytes())?;
-                        }
-
-                        chunk_buffer.clear();
-                    }
-
-                    Err(_) => {
-                        chunk_buffer.push(line.to_string());
-                    }
-                }
-            }
-        }
-
-        message_content_buf.flush()?;
-
-        let content = String::from_utf8(message_content_buf.into_inner()?)?;
-
-        let asst_message = Message {
-            role: Role::Assistant,
-            content,
-            timestamp: timestamp(),
-        };
-
-        self.add_thread_message(thread_id, asst_message)?;
-
-        self.save_to_db()?;
-
-        Ok(())
+        self.run_shell(thread_id, &mut reader).await
     }
 
     pub async fn run_shell<R>(&mut self, thread_id: Uuid, reader: &mut R) -> anyhow::Result<()>
@@ -517,22 +414,27 @@ where
 
         loop {
             reader.read_line(&mut buf).await?;
+            let buf_trimmed = buf.trim();
 
-            if buf.is_empty() {
+            if buf_trimmed.is_empty() {
                 continue;
             }
 
-            if buf.to_lowercase().trim() == "q" {
+            if buf_trimmed.to_lowercase() == "q" {
                 break;
             }
 
-            self.send_user_message(&buf, thread_id).await?;
+            let stream = self.stream_user_message(buf_trimmed, thread_id).await?;
 
-            if let Some(writer) = self.writer() {
-                writer.write_all("\n".as_bytes())?;
-                writer.flush()?;
+            pin_mut!(stream);
+
+            while let Some(Ok(token)) = stream.next().await {
+                let write_bytes = token.map(|t| t.as_bytes().to_owned()).unwrap_or_default();
+
+                self.write_all_flushed(&write_bytes)?;
             }
 
+            self.write_all_flushed("\n")?;
             buf.clear();
         }
 
