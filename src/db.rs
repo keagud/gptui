@@ -25,14 +25,18 @@ const SCHEMA_CMD: &str = r#"
 "#;
 
 pub fn data_dir() -> io::Result<PathBuf> {
-    let dir = BaseDirs::new()
-        .ok_or(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Could not locate the home directory",
-        ))?
-        .data_dir()
-        .to_path_buf()
-        .join("gpt_rs");
+    let dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_assets")
+    } else {
+        BaseDirs::new()
+            .ok_or(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not locate the home directory",
+            ))?
+            .data_dir()
+            .to_path_buf()
+            .join("gpt_rs")
+    };
 
     match dir.try_exists() {
         Ok(true) => Ok(dir),
