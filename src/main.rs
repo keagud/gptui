@@ -3,9 +3,9 @@
 use std::io::{self, Write};
 
 use gpt::app;
-use gpt::{tui, Role, Session};
+use gpt::{Role, Session};
 
-use futures::{stream, Stream, StreamExt};
+use futures::StreamExt;
 use futures_util::pin_mut;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
     let thread_id = session.new_thread("You are a helpful assistant")?;
 
-    let mut stream = session
+    let stream = session
         .stream_user_message(
             "Write a short poem about the Rust programming langauge in the Walt Whitman. Limit your poem to 10 lines at most.",
             thread_id,

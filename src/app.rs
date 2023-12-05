@@ -137,7 +137,7 @@ impl<'a> AppMode for ChatMode<'a> {
             .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
             .split(frame.size());
 
-        frame.render_widget(Paragraph::new(format!("Chat mode")), frame.size())
+        frame.render_widget(Paragraph::new("Chat mode".to_string()), frame.size())
     }
 
     fn update(app: &mut App, action: Self::Action) {

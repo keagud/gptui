@@ -4,8 +4,8 @@ pub mod app;
 pub mod tui;
 
 use anyhow::format_err;
-use async_stream;
-use futures::{stream, Stream, StreamExt};
+
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use regex::{self, RegexBuilder};
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -16,7 +16,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fs, path};
+
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -382,7 +382,7 @@ where
         //      let mut lines = buffered_reader.lines();
 
         // regex to remove the 'data: ' prefix on the chunks
-        let pat = RegexBuilder::new(r"^\s*data:")
+        let _pat = RegexBuilder::new(r"^\s*data:")
             .multi_line(true)
             .build()
             .unwrap();
