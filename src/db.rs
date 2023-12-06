@@ -94,11 +94,11 @@ impl DbStore for Thread {
 
         let messages_to_store: Vec<&Message> = match last_ts_result {
             Ok(n) => Ok(self
-                .messages
-                .iter()
+                .messages()
+                .into_iter()
                 .filter(|m| m.timestamp_epoch() > n)
                 .collect()),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(self.messages.iter().collect()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(self.messages()),
             Err(e) => Err(e),
         }?;
 

@@ -1,12 +1,12 @@
 use crate::session::{Message, Role, Session, Thread};
 use anyhow;
 use anyhow::format_err;
+use arboard;
 use chrono::Utc;
 use colored::Colorize;
 use futures_util::pin_mut;
 use itertools::Itertools;
 use std::io::{self, Read, Write};
-use arboard;
 
 use clap::{Parser, Subcommand};
 use futures::{Stream, StreamExt};
@@ -163,7 +163,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
 
             clear_screen()?;
 
-            for msg in current_thread.messages.iter() {
+            for msg in current_thread.messages().into_iter() {
                 print_message(msg);
             }
 

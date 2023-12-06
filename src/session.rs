@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
 use std::sync::Arc;
@@ -18,6 +19,16 @@ use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 use crate::db::{init_db, DbStore};
+
+lazy_static::lazy_static! {
+
+   static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r#"```(?<header>\w+)?(?<content>.*?)```"#)
+        .dot_matches_new_line(true)
+        .build()
+        .expect("Premade regex should be ok");
+
+
+}
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -101,11 +112,70 @@ impl Message {
     pub fn is_system(&self) -> bool {
         self.role == Role::System
     }
+
+    pub fn code_blocks(&self) -> Vec<CodeBlock> {
+        CODEBLOCK_PATTERN
+            .captures_iter(&self.content)
+            .map(|caps| {
+                (
+                    caps.name("header").map(|s| s.as_str().to_owned()),
+                    caps.name("content")
+                        .map(|s| s.as_str().to_owned())
+                        .expect("Failed to extract block content"),
+                )
+            })
+            .map(|(language, content)| CodeBlock {
+                language: language.into(),
+                content: content.into(),
+            })
+            .collect()
+    }
+
+    pub fn get_content_annotations(&self, start_index: usize) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
+        let mut counter = start_index;
+        let mut blocks = Vec::new();
+
+        let replaced = CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
+            let block = CodeBlock {
+                language: cap.get(1).map(|s| s.as_str().to_owned()),
+                content: cap
+                    .get(2)
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default(),
+            };
+
+            let lang = if let Some(ref s) = block.language {
+                s
+            } else {
+                ""
+            };
+
+            let annotated = format!("```{}\n{}\n```({})\n", lang, &block.content, counter);
+            counter += 1;
+
+            blocks.push(block);
+
+            annotated
+        });
+
+        let blocks_opt = if blocks.is_empty() {
+            None
+        } else {
+            Some(blocks)
+        };
+
+        (replaced, blocks_opt)
+    }
+}
+
+pub struct CodeBlock {
+    pub language: Option<String>,
+    pub content: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct Thread {
-    pub messages: Vec<Message>,
+    messages: Vec<Message>,
     pub model: String,
 
     #[serde(skip)]
@@ -123,6 +193,10 @@ impl Thread {
             id,
             code_block_counts: 0,
         }
+    }
+
+    pub fn messages(&self) -> Vec<&Message> {
+        self.messages.iter().collect()
     }
     /// Get the prompt used to begin this thread
     pub fn prompt(&self) -> &str {
@@ -169,6 +243,8 @@ impl Thread {
     pub fn last_message(&self) -> Option<&Message> {
         self.messages.iter().last()
     }
+
+    pub fn annotated_messages(&self) {}
 }
 
 /// Create a reqwest::Client with the correct default authorization headers
@@ -378,6 +454,7 @@ where
         }
     }
 
+    /// Get an (immutable) reference to a thread from its id
     pub fn thread_by_id(&self, id: Uuid) -> Option<&Thread> {
         self.threads.get(&id)
     }
