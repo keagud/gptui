@@ -93,7 +93,11 @@ impl DbStore for Thread {
             .query_row([&self.str_id()], |row| row.get(0));
 
         let messages_to_store: Vec<&Message> = match last_ts_result {
-            Ok(n) => Ok(self.messages.iter().filter(|m| m.timestamp > n).collect()),
+            Ok(n) => Ok(self
+                .messages
+                .iter()
+                .filter(|m| m.timestamp_epoch() > n)
+                .collect()),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(self.messages.iter().collect()),
             Err(e) => Err(e),
         }?;
@@ -110,7 +114,7 @@ impl DbStore for Thread {
                     &self.str_id(),
                     message.role.to_num(),
                     &message.content,
-                    message.timestamp,
+                    message.timestamp_epoch(),
                 ])?;
             }
         }
@@ -140,11 +144,11 @@ impl DbStore for Thread {
 
         let messages: Vec<Message> = stmt
             .query_and_then([&id_str], |row| -> anyhow::Result<Message> {
-                Ok(Message {
-                    role: Role::from_num(row.get::<usize, i64>(0)?.try_into()?)?,
-                    content: row.get(1)?,
-                    timestamp: row.get(2)?,
-                })
+                Ok(Message::new(
+                    Role::from_num(row.get::<usize, i64>(0)?.try_into()?)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                ))
             })?
             .collect::<anyhow::Result<Vec<Message>>>()?;
 

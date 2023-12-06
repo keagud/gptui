@@ -1,6 +1,7 @@
 use anyhow::format_err;
+use chrono::{DateTime, Utc};
 use futures::{Stream, StreamExt};
-use futures_util::pin_mut;
+use futures_util::{pin_mut, TryStreamExt};
 use itertools::Itertools;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -9,6 +10,7 @@ use serde_json::{self, json, Value};
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
@@ -61,7 +63,44 @@ pub struct Message {
     pub content: String,
 
     #[serde(skip)]
-    pub timestamp: f64,
+    pub timestamp: DateTime<Utc>,
+}
+
+impl Message {
+    pub fn new(role: Role, content: String, timestamp_epoch: f64) -> Self {
+        let timestamp_secs = f64::floor(timestamp_epoch) as i64;
+        let timestamp_nanos = f64::fract(timestamp_epoch) * 1_000_000f64;
+
+        let timestamp = DateTime::from_timestamp(timestamp_secs, timestamp_nanos.floor() as u32)
+            .expect("Epoch time was valid");
+
+        Self {
+            role,
+            content,
+            timestamp,
+        }
+    }
+
+    pub fn timestamp_epoch(&self) -> f64 {
+        let subsecs = self.timestamp.timestamp_subsec_millis() as f64;
+        let secs = self.timestamp.timestamp() as f64;
+
+        secs + (subsecs / 1000f64)
+    }
+
+    pub fn timestamp_millis(&self) -> i64 {
+        self.timestamp.timestamp_millis()
+    }
+
+    pub fn is_user(&self) -> bool {
+        self.role == Role::User
+    }
+    pub fn is_assistant(&self) -> bool {
+        self.role == Role::Assistant
+    }
+    pub fn is_system(&self) -> bool {
+        self.role == Role::System
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -101,8 +140,17 @@ impl Thread {
         })
     }
 
-    fn add_message(&mut self, msg: Message) {
+    pub fn init_time(&self) -> Option<DateTime<Utc>> {
+        self.messages.first().map(|m| m.timestamp)
+    }
+
+    pub fn add_message(&mut self, msg: Message) {
         self.messages.push(msg);
+    }
+
+    /// Get the first non-system message in this thread
+    pub fn first_message(&self) -> Option<&Message> {
+        self.messages.iter().find(|m| !m.is_system()).to_owned()
     }
 }
 
@@ -286,7 +334,7 @@ where
     }
 
     fn add_thread_message(&mut self, id: Uuid, message: Message) -> anyhow::Result<()> {
-        self.thread_by_id(id)
+        self.thread_by_id_mut(id)
             .ok_or(anyhow::format_err!("{id} is not a thread id"))?
             .add_message(message);
 
@@ -299,7 +347,7 @@ where
         let messages = vec![Message {
             role: Role::System,
             content: prompt.into(),
-            timestamp: timestamp(),
+            timestamp: Utc::now(),
         }];
 
         let model = "gpt-4".into();
@@ -318,9 +366,30 @@ where
         }
     }
 
+    pub fn thread_by_id(&self, id: Uuid) -> Option<&Thread> {
+        self.threads.get(&id)
+    }
+
     /// Get a mutable reference to a thread from its id
-    pub fn thread_by_id(&mut self, id: Uuid) -> Option<&mut Thread> {
+    pub fn thread_by_id_mut(&mut self, id: Uuid) -> Option<&mut Thread> {
         self.threads.get_mut(&id)
+    }
+
+    /// Get references to the Ids and contents of all non-empty threads,
+    /// sorted ascending by creation time.
+    pub fn ordered_threads(&self) -> Vec<(&Uuid, &Thread)> {
+        self.threads
+            .iter()
+            .filter(|(_, t)| !t.messages.is_empty())
+            .sorted_by_key(|(_, t)| t.init_time().expect("Thread has no messages"))
+            .collect_vec()
+    }
+
+    pub fn nonempty_count(&self) -> usize {
+        self.threads
+            .iter()
+            .filter(|(_, t)| !t.messages.is_empty())
+            .count()
     }
 
     pub async fn stream_user_message(
@@ -328,19 +397,15 @@ where
         msg: &str,
         thread_id: Uuid,
     ) -> anyhow::Result<impl Stream<Item = anyhow::Result<Option<String>>>> {
-        // if msg.trim().is_empty() {
-        //     return None;
-        // }
-
         let user_message = Message {
             role: Role::User,
             content: msg.trim().into(),
-            timestamp: timestamp(),
+            timestamp: Utc::now(),
         };
 
         let data = {
             let thread = self
-                .thread_by_id(thread_id)
+                .thread_by_id_mut(thread_id)
                 .ok_or(anyhow::format_err!("No thread found with id: {thread_id}"))?;
 
             thread.add_message(user_message);
@@ -356,6 +421,8 @@ where
             .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
 
         let mut buf = String::new();
+
+        let mut message_tokens = String::new();
 
         let _stream = async_stream::stream! {
 
@@ -381,6 +448,8 @@ where
                     if let Some(chunks) = parsed {
 
                         for chunk in chunks.iter() {
+                                if let Some(s) = chunk.token() {
+                        }
                                 yield Ok(chunk.token());
 
                         }
@@ -388,8 +457,10 @@ where
 
             }
 
-        };
 
+
+
+        };
         Ok(_stream)
     }
 
