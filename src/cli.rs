@@ -6,6 +6,7 @@ use colored::Colorize;
 use futures_util::pin_mut;
 use itertools::Itertools;
 use std::io::{self, Read, Write};
+use arboard;
 
 use clap::{Parser, Subcommand};
 use futures::{Stream, StreamExt};
@@ -42,11 +43,15 @@ fn clear_screen() -> anyhow::Result<()> {
 fn print_message(msg: &Message) -> Option<()> {
     match msg.role {
         Role::System => return None,
-        Role::User => println!("{}", "<User>".green().bold().underline()),
-        Role::Assistant => println!("{}", "<Assistant>".blue().bold().underline()),
+        Role::User => {
+            println!("{}", "<User>".green().bold().underline());
+            println!("{}{}", INPUT_INDICATOR, msg.content);
+        }
+        Role::Assistant => {
+            println!("{}", "<Assistant>".blue().bold().underline());
+            println!("{}", msg.content)
+        }
     }
-
-    println!("{}", msg.content);
 
     Some(())
 }
