@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::{Message, Role, Thread};
+use crate::session::{Message, Role, Thread};
 
 use directories::BaseDirs;
 use rusqlite::{params, Connection};

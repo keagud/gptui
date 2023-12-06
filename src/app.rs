@@ -11,13 +11,12 @@ use ratatui::{
 };
 
 use crate::{
+    session::{Message, Role, Session, Thread},
     tui::{self, TermEvent},
-    Session,
 };
 use anyhow::anyhow;
 use std::{default, marker::PhantomData, ops::Deref};
 
-use crate::{Message, Role, Thread};
 use tui_textarea::TextArea;
 
 #[derive(Debug, PartialEq, Eq, Default)]

@@ -1,5 +1,5 @@
 use gpt::app;
-use gpt::{Role, Session};
+use gpt::session::{Role, Session};
 
 async fn _main() -> anyhow::Result<()> {
     app::app_test().await?;
