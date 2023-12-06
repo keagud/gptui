@@ -152,11 +152,7 @@ impl DbStore for Thread {
             })?
             .collect::<anyhow::Result<Vec<Message>>>()?;
 
-        Ok(Thread {
-            messages,
-            model,
-            id,
-        })
+        Ok(Thread::new(messages, &model, id))
     }
 
     fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>> {

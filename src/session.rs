@@ -110,9 +110,20 @@ pub struct Thread {
 
     #[serde(skip)]
     pub id: Uuid,
+
+    #[serde(skip)]
+    code_block_counts: usize,
 }
 
 impl Thread {
+    pub fn new(messages: Vec<Message>, model: &str, id: Uuid) -> Self {
+        Self {
+            messages,
+            model: model.into(),
+            id,
+            code_block_counts: 0,
+        }
+    }
     /// Get the prompt used to begin this thread
     pub fn prompt(&self) -> &str {
         self.messages
@@ -140,6 +151,7 @@ impl Thread {
         })
     }
 
+    ///Return the time the first non-system message was sent
     pub fn init_time(&self) -> Option<DateTime<Utc>> {
         self.messages.first().map(|m| m.timestamp)
     }
@@ -151,6 +163,11 @@ impl Thread {
     /// Get the first non-system message in this thread
     pub fn first_message(&self) -> Option<&Message> {
         self.messages.iter().find(|m| !m.is_system()).to_owned()
+    }
+
+    /// Get the most recent message (could be a system message).
+    pub fn last_message(&self) -> Option<&Message> {
+        self.messages.iter().last()
     }
 }
 
@@ -353,12 +370,7 @@ where
         let model = "gpt-4".into();
         let id = Uuid::new_v4();
 
-        let thread = Thread {
-            messages,
-            model,
-            id,
-        };
-
+        let thread = Thread::new(messages, model, id);
         if self.threads.insert(id, thread).is_some() {
             Err(anyhow::format_err!("Thread ID was already present: {id}"))
         } else {
