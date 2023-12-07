@@ -1,5 +1,7 @@
 use anyhow::format_err;
+use bat::PrettyPrinter;
 use chrono::{DateTime, Utc};
+use colored::Colorize;
 use futures::{Stream, StreamExt};
 use futures_util::{pin_mut, TryStreamExt};
 use itertools::Itertools;
@@ -130,7 +132,6 @@ impl Message {
                     .get(2)
                     .map(|s| s.as_str().to_owned())
                     .unwrap_or_default(),
-                index: *index,
             };
 
             let lang = if let Some(ref s) = block.language {
@@ -161,7 +162,26 @@ impl Message {
 pub struct CodeBlock {
     pub language: Option<String>,
     pub content: String,
-    pub index: usize,
+}
+
+impl CodeBlock {
+    pub fn pretty_print(&self, index: usize) -> anyhow::Result<()> {
+        let mut printer = PrettyPrinter::new();
+        printer.input_from_bytes(&self.content.as_bytes());
+
+        if let Some(ref language) = self.language {
+            printer.language(language);
+        }
+
+        printer.print()?;
+        io::stdout().flush()?;
+
+        let annotation = format!("({index})").yellow().bold();
+        print!("{}", &annotation);
+        io::stdout().flush()?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -183,23 +203,10 @@ impl Thread {
     pub fn new(messages: Vec<Message>, model: &str, id: Uuid) -> Self {
         let mut blocks_count = 1;
 
-        let (message_contents, code_blocks): (Vec<_>, Vec<_>) = messages
-            .iter()
-            .map(|m| m.get_content_annotations(&mut blocks_count))
-            .unzip();
-
-        let code_blocks: HashMap<usize, CodeBlock> = code_blocks
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|m| (m.index, m))
-            .collect();
-
         Self {
             messages,
             model: model.into(),
             id,
-            code_blocks,
             ..Default::default()
         }
     }

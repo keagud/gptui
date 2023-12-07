@@ -6,6 +6,10 @@ use bat::PrettyPrinter;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use crossterm::{
+    self,
+    terminal::{Clear, ClearType},
+};
 use futures::{Stream, StreamExt};
 use futures_util::pin_mut;
 use itertools::Itertools;
@@ -13,6 +17,7 @@ use std::io::{self, Read, Write};
 
 const DEFAULT_PROMPT: &str = r#"You are a helpful assistant"#;
 const INPUT_INDICATOR: &str = ">> ";
+const BLOCK_DELIMITER: &str = r"```";
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -39,6 +44,8 @@ fn clear_screen() -> anyhow::Result<()> {
         std::process::Command::new("clear").status()?;
     }
 
+    io::stdout().flush()?;
+
     Ok(())
 }
 
@@ -64,6 +71,15 @@ fn print_message(msg: &Message) -> Option<()> {
     Some(())
 }
 
+fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, crossterm::cursor::MoveLeft(bytes_back))?;
+    crossterm::execute!(stdout, Clear(ClearType::FromCursorDown))?;
+    stdout.flush()?;
+
+    Ok(())
+}
+
 pub async fn run_shell<T>(session: &mut Session<T>, thread_id: uuid::Uuid) -> anyhow::Result<()>
 where
     T: Write,
@@ -77,6 +93,7 @@ where
     let mut code_block_counter = 1usize;
 
     clear_screen()?;
+
     for msg in thread.messages().iter() {
         match msg.role {
             Role::System => continue,
@@ -108,8 +125,6 @@ where
     let mut show_role = true;
 
     loop {
-        let mut single_msg_blocks = code_block_counter;
-
         if show_role {
             println!("{}", "<User>".green().bold().underline());
         }
@@ -139,28 +154,50 @@ where
 
         let mut is_block = false;
         let mut block_bytes = 0usize;
+        let mut block_start = 0usize;
 
         while let Some(content) = stream.next().await {
             if let Some(token) = content? {
                 message_content.push_str(&token);
                 stdout.write_all(token.as_bytes())?;
 
-                let block_border = message_content.trim().ends_with("```");
+                let block_border = token.trim().contains(BLOCK_DELIMITER);
 
                 match (is_block, block_border) {
                     (false, true) => {
                         is_block = true;
-                        block_bytes = "```".len()
+                        block_start = message_content.len() - token.len();
                     }
-                    (true, false) => {
-                        block_bytes += token.len();
-                    }
+                    (true, false) => (),
                     (true, true) => {
                         is_block = false;
-                        block_bytes += token.len();
-                        let annotation = format!("({})", single_msg_blocks);
-                        stdout.write_all(annotation.as_bytes())?;
-                        single_msg_blocks += 1;
+
+                        let block_slice = &message_content[block_start..];
+
+                        let language = block_slice
+                            .lines()
+                            .next()
+                            .and_then(|ln| ln.strip_prefix(BLOCK_DELIMITER))
+                            .and_then(|s| {
+                                if s.is_empty() {
+                                    None
+                                } else {
+                                    Some(s.trim().to_string())
+                                }
+                            });
+
+                        let content = block_slice
+                            .lines()
+                            .skip(1)
+                            .take_while(|ln| ln.trim() != BLOCK_DELIMITER)
+                            .join("\n");
+
+                        let code_block = CodeBlock { language, content };
+
+                        delete_bytes_back(block_slice.len() as u16)?;
+                        io::stdout().flush()?;
+                        code_block.pretty_print(code_blocks.len() + 1)?;
+                        code_blocks.push(dbg!(code_block));
                     }
                     _ => (),
                 }
@@ -206,9 +243,7 @@ pub async fn run_cli() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Resume { index }
-            if (*index < 1 || *index > dbg!(session.nonempty_count()) as i64) =>
-        {
+        Commands::Resume { index } if (*index < 1 || *index > session.nonempty_count() as i64) => {
             return Err(format_err!("Invalid index {index}"))
         }
 
