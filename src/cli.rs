@@ -2,14 +2,14 @@ use crate::session::{CodeBlock, Message, Role, Session, Thread};
 use anyhow;
 use anyhow::format_err;
 use arboard;
+use bat::PrettyPrinter;
 use chrono::Utc;
+use clap::{Parser, Subcommand};
 use colored::Colorize;
+use futures::{Stream, StreamExt};
 use futures_util::pin_mut;
 use itertools::Itertools;
 use std::io::{self, Read, Write};
-
-use clap::{Parser, Subcommand};
-use futures::{Stream, StreamExt};
 
 const DEFAULT_PROMPT: &str = r#"You are a helpful assistant"#;
 const INPUT_INDICATOR: &str = ">> ";
@@ -27,6 +27,8 @@ enum Commands {
     New { prompt: Option<String> },
     Resume { index: i64 },
 }
+
+fn pprint(input: &str) {}
 
 fn clear_screen() -> anyhow::Result<()> {
     if cfg!(target_os = "windows") {
@@ -136,6 +138,7 @@ where
         let mut message_content = String::new();
 
         let mut is_block = false;
+        let mut block_bytes = 0usize;
 
         while let Some(content) = stream.next().await {
             if let Some(token) = content? {
@@ -145,9 +148,16 @@ where
                 let block_border = message_content.trim().ends_with("```");
 
                 match (is_block, block_border) {
-                    (false, true) => is_block = true,
+                    (false, true) => {
+                        is_block = true;
+                        block_bytes = "```".len()
+                    }
+                    (true, false) => {
+                        block_bytes += token.len();
+                    }
                     (true, true) => {
                         is_block = false;
+                        block_bytes += token.len();
                         let annotation = format!("({})", single_msg_blocks);
                         stdout.write_all(annotation.as_bytes())?;
                         single_msg_blocks += 1;
