@@ -22,7 +22,7 @@ use crate::db::{init_db, DbStore};
 
 lazy_static::lazy_static! {
 
-   static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r#"```(?<header>\w+)?(?<content>.*?)```"#)
+   static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r"```(?<header>\w+)?(?<content>.*?)```")
         .dot_matches_new_line(true)
         .build()
         .expect("Premade regex should be ok");
@@ -68,13 +68,16 @@ impl Role {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Message {
     pub role: Role,
     pub content: String,
 
     #[serde(skip)]
     pub timestamp: DateTime<Utc>,
+
+    #[serde(skip)]
+    pub annotated_content: Option<String>,
 }
 
 impl Message {
@@ -89,6 +92,7 @@ impl Message {
             role,
             content,
             timestamp,
+            ..Default::default()
         }
     }
 
@@ -113,26 +117,10 @@ impl Message {
         self.role == Role::System
     }
 
-    pub fn code_blocks(&self) -> Vec<CodeBlock> {
-        CODEBLOCK_PATTERN
-            .captures_iter(&self.content)
-            .map(|caps| {
-                (
-                    caps.name("header").map(|s| s.as_str().to_owned()),
-                    caps.name("content")
-                        .map(|s| s.as_str().to_owned())
-                        .expect("Failed to extract block content"),
-                )
-            })
-            .map(|(language, content)| CodeBlock {
-                language: language.into(),
-                content: content.into(),
-            })
-            .collect()
-    }
-
-    pub fn get_content_annotations(&self, start_index: usize) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
-        let mut counter = start_index;
+    pub fn get_content_annotations(
+        &self,
+        index: &mut usize,
+    ) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
         let mut blocks = Vec::new();
 
         let replaced = CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
@@ -142,6 +130,7 @@ impl Message {
                     .get(2)
                     .map(|s| s.as_str().to_owned())
                     .unwrap_or_default(),
+                index: *index,
             };
 
             let lang = if let Some(ref s) = block.language {
@@ -150,8 +139,8 @@ impl Message {
                 ""
             };
 
-            let annotated = format!("```{}\n{}\n```({})\n", lang, &block.content, counter);
-            counter += 1;
+            let annotated = format!("```{}\n{}\n```({})\n", lang, &block.content, index);
+            *index += 1;
 
             blocks.push(block);
 
@@ -168,9 +157,11 @@ impl Message {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct CodeBlock {
     pub language: Option<String>,
     pub content: String,
+    pub index: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -183,15 +174,33 @@ pub struct Thread {
 
     #[serde(skip)]
     code_block_counts: usize,
+
+    #[serde(skip)]
+    code_blocks: HashMap<usize, CodeBlock>,
 }
 
 impl Thread {
     pub fn new(messages: Vec<Message>, model: &str, id: Uuid) -> Self {
+        let mut blocks_count = 1;
+
+        let (message_contents, code_blocks): (Vec<_>, Vec<_>) = messages
+            .iter()
+            .map(|m| m.get_content_annotations(&mut blocks_count))
+            .unzip();
+
+        let code_blocks: HashMap<usize, CodeBlock> = code_blocks
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|m| (m.index, m))
+            .collect();
+
         Self {
             messages,
             model: model.into(),
             id,
-            code_block_counts: 0,
+            code_blocks,
+            ..Default::default()
         }
     }
 
@@ -441,9 +450,10 @@ where
             role: Role::System,
             content: prompt.into(),
             timestamp: Utc::now(),
+            ..Default::default()
         }];
 
-        let model = "gpt-4".into();
+        let model = "gpt-4";
         let id = Uuid::new_v4();
 
         let thread = Thread::new(messages, model, id);
@@ -490,6 +500,7 @@ where
             role: Role::User,
             content: msg.trim().into(),
             timestamp: Utc::now(),
+            ..Default::default()
         };
 
         let data = {

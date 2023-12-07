@@ -10,6 +10,7 @@ anyhow = "1.0.75"
 arboard = "3.3.0"
 async-fs = "2.1.0"
 async-stream = "0.3.5"
+bat = "0.24.0"
 chrono = "0.4.31"
 clap = { version = "4.4.8", features = ["derive"] }
 colored = "2.0.4"

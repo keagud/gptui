@@ -1,4 +1,4 @@
-use crate::session::{Message, Role, Session, Thread};
+use crate::session::{CodeBlock, Message, Role, Session, Thread};
 use anyhow;
 use anyhow::format_err;
 use arboard;
@@ -40,6 +40,12 @@ fn clear_screen() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn backspace() -> io::Result<()> {
+    io::stdout().write_all("\x08".as_bytes())?;
+
+    Ok(())
+}
+
 fn print_message(msg: &Message) -> Option<()> {
     match msg.role {
         Role::System => return None,
@@ -64,6 +70,34 @@ where
         .thread_by_id(thread_id)
         .ok_or_else(|| format_err!("Thread does not exist"))?;
 
+    let mut code_blocks: Vec<CodeBlock> = Vec::new();
+
+    let mut code_block_counter = 1usize;
+
+    clear_screen()?;
+    for msg in thread.messages().iter() {
+        match msg.role {
+            Role::System => continue,
+            Role::User => {
+                println!("{}", "<User>".green().bold().underline());
+                println!("{}{}", INPUT_INDICATOR, msg.content);
+            }
+
+            Role::Assistant => {
+                println!("{}", "<Assistant>".blue().bold().underline());
+
+                let (annotated_content, blocks) =
+                    msg.get_content_annotations(&mut code_block_counter);
+
+                println!("{}", annotated_content);
+
+                if let Some(blocks) = blocks {
+                    code_blocks.extend(blocks.into_iter());
+                }
+            }
+        }
+    }
+
     let mut stdout = io::stdout();
     let mut stdin = io::stdin();
 
@@ -72,6 +106,8 @@ where
     let mut show_role = true;
 
     loop {
+        let mut single_msg_blocks = code_block_counter;
+
         if show_role {
             println!("{}", "<User>".green().bold().underline());
         }
@@ -99,10 +135,26 @@ where
 
         let mut message_content = String::new();
 
+        let mut is_block = false;
+
         while let Some(content) = stream.next().await {
             if let Some(token) = content? {
                 message_content.push_str(&token);
                 stdout.write_all(token.as_bytes())?;
+
+                let block_border = message_content.trim().ends_with("```");
+
+                match (is_block, block_border) {
+                    (false, true) => is_block = true,
+                    (true, true) => {
+                        is_block = false;
+                        let annotation = format!("({})", single_msg_blocks);
+                        stdout.write_all(annotation.as_bytes())?;
+                        single_msg_blocks += 1;
+                    }
+                    _ => (),
+                }
+
                 stdout.flush()?;
             }
         }
@@ -111,6 +163,7 @@ where
             content: message_content,
             role: Role::Assistant,
             timestamp: Utc::now(),
+            ..Default::default()
         };
 
         session
@@ -161,12 +214,6 @@ pub async fn run_cli() -> anyhow::Result<()> {
                 .thread_by_id(thread_id)
                 .expect("Could not get thread from id");
 
-            clear_screen()?;
-
-            for msg in current_thread.messages().into_iter() {
-                print_message(msg);
-            }
-
             run_shell(&mut session, thread_id).await?;
         }
         Commands::New { prompt } => {
@@ -177,7 +224,6 @@ pub async fn run_cli() -> anyhow::Result<()> {
 
             let new_thread_id = session.new_thread(prompt_str)?;
 
-            clear_screen()?;
             run_shell(&mut session, new_thread_id).await?;
         }
     };
