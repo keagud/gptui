@@ -1093,6 +1093,7 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "spinners",
+ "syntect",
  "thiserror",
  "tokio",
  "tokio-stream",
