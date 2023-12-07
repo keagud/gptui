@@ -14,7 +14,10 @@ use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style, ThemeSet};
+use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::util::LinesWithEndings;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -28,8 +31,15 @@ lazy_static::lazy_static! {
         .build()
         .expect("Premade regex should be ok");
 
+    static ref SYNTAX_SET: syntect::parsing::SyntaxSet =  syntect::parsing::SyntaxSet::load_defaults_newlines();
+
+
+    static ref THEME_SET: syntect::highlighting::ThemeSet = syntect::highlighting::ThemeSet::load_defaults();
+
 
 }
+
+const DEFAULT_THEME: &str = "base16-eighties.dark";
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
@@ -165,8 +175,34 @@ pub struct CodeBlock {
 
 impl CodeBlock {
     pub fn pretty_print_str(&self, index: usize) -> anyhow::Result<String> {
-        // TODO
-        Ok(self.as_raw())
+        let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
+
+        let mut formatted_string = String::new();
+
+        for line in LinesWithEndings::from(&self.content) {
+            let ranges: Vec<(Style, &str)> = hl.highlight_line(line, &SYNTAX_SET)?;
+            let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
+            formatted_string.push_str(&escaped);
+        }
+
+        // reset terminal styles
+        formatted_string.push_str("\x1b[0m");
+
+        formatted_string.push_str(&format!("\n({index})\n"));
+        Ok(formatted_string)
+    }
+
+    fn syntax(&self) -> &SyntaxReference {
+        self.language
+            .as_ref()
+            .and_then(|lang| SYNTAX_SET.find_syntax_by_token(lang))
+            .or_else(|| {
+                self.content
+                    .lines()
+                    .next()
+                    .and_then(|ln| SYNTAX_SET.find_syntax_by_first_line(ln))
+            })
+            .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text())
     }
 
     pub fn as_raw(&self) -> String {
@@ -351,40 +387,6 @@ fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>
     };
 
     Ok((return_chunks, remainder))
-}
-
-#[cfg(test)]
-mod test_parser {
-    use super::*;
-
-    #[test]
-    fn test_parse_chunks() {
-        let data = r#"
-         data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":" today"},"finish_reason":null}]}
-{"id":"chatcmpl-123","object":"chat.completion.chunk", "c
-        "#;
-
-        let (parsed, remaining) = try_parse_chunks(data).unwrap();
-
-        let parsed = parsed.unwrap();
-        let remaining = remaining.unwrap();
-
-        assert_eq!(
-            remaining.as_str(),
-            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk", "c"#
-        );
-
-        for (token, expected) in parsed
-            .into_iter()
-            .map(|chunk| chunk.token())
-            .zip(["", "!", " today"].into_iter())
-        {
-            assert!(token.is_some());
-            assert_eq!(token.unwrap().as_str(), expected);
-        }
-    }
 }
 
 impl Session<Stdout> {
@@ -621,5 +623,62 @@ where
 {
     fn drop(&mut self) {
         self.save_to_db().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    pub fn test_block_print() {
+        let content = r#"
+        for i in range(10):
+            print(i)
+        "#
+        .into();
+
+        let expected = r#"[48;2;45;45;45m[38;2;211;208;200m
+[48;2;45;45;45m[38;2;211;208;200m        [48;2;45;45;45m[38;2;204;153;204mfor[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;211;208;200mi[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;204;153;204min[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;102;204;204mrange[48;2;45;45;45m[38;2;211;208;200m([48;2;45;45;45m[38;2;249;145;87m10[48;2;45;45;45m[38;2;211;208;200m)[48;2;45;45;45m[38;2;211;208;200m:[48;2;45;45;45m[38;2;211;208;200m
+[48;2;45;45;45m[38;2;211;208;200m            [48;2;45;45;45m[38;2;102;204;204mprint[48;2;45;45;45m[38;2;211;208;200m([48;2;45;45;45m[38;2;211;208;200mi[48;2;45;45;45m[38;2;211;208;200m)[48;2;45;45;45m[38;2;211;208;200m
+[48;2;45;45;45m[38;2;211;208;200m        [0m
+(1)
+"#;
+
+        let test_block = CodeBlock {
+            language: Some("python".into()),
+            content,
+        };
+
+        let pretty = test_block.pretty_print_str(1).unwrap();
+        assert_eq!(pretty.as_str(), expected);
+    }
+    #[test]
+    fn test_parse_chunks() {
+        let data = r#"
+         data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-3.5-turbo-0613", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"content":" today"},"finish_reason":null}]}
+{"id":"chatcmpl-123","object":"chat.completion.chunk", "c
+        "#;
+
+        let (parsed, remaining) = try_parse_chunks(data).unwrap();
+
+        let parsed = parsed.unwrap();
+        let remaining = remaining.unwrap();
+
+        assert_eq!(
+            remaining.as_str(),
+            r#"{"id":"chatcmpl-123","object":"chat.completion.chunk", "c"#
+        );
+
+        for (token, expected) in parsed
+            .into_iter()
+            .map(|chunk| chunk.token())
+            .zip(["", "!", " today"].into_iter())
+        {
+            assert!(token.is_some());
+            assert_eq!(token.unwrap().as_str(), expected);
+        }
     }
 }
