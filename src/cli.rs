@@ -2,7 +2,6 @@ use crate::session::{CodeBlock, Message, Role, Session, Thread};
 use anyhow;
 use anyhow::format_err;
 use arboard;
-use bat::PrettyPrinter;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -196,7 +195,12 @@ where
 
                         delete_bytes_back(block_slice.len() as u16)?;
                         io::stdout().flush()?;
-                        code_block.pretty_print(code_blocks.len() + 1)?;
+
+                        io::stdout().write_all(
+                            code_block
+                                .pretty_print_str(code_blocks.len() + 1)?
+                                .as_bytes(),
+                        )?;
                         code_blocks.push(dbg!(code_block));
                     }
                     _ => (),

@@ -1,5 +1,4 @@
 use anyhow::format_err;
-use bat::PrettyPrinter;
 use chrono::{DateTime, Utc};
 use colored::Colorize;
 use futures::{Stream, StreamExt};
@@ -165,22 +164,17 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    pub fn pretty_print(&self, index: usize) -> anyhow::Result<()> {
-        let mut printer = PrettyPrinter::new();
-        printer.input_from_bytes(&self.content.as_bytes());
+    pub fn pretty_print_str(&self, index: usize) -> anyhow::Result<String> {
+        // TODO
+        Ok(self.as_raw())
+    }
 
-        if let Some(ref language) = self.language {
-            printer.language(language);
-        }
-
-        printer.print()?;
-        io::stdout().flush()?;
-
-        let annotation = format!("({index})").yellow().bold();
-        print!("{}", &annotation);
-        io::stdout().flush()?;
-
-        Ok(())
+    pub fn as_raw(&self) -> String {
+        format!(
+            "```{}\n{}\n```",
+            &self.language.as_deref().unwrap_or("".into()),
+            &self.content
+        )
     }
 }
 
