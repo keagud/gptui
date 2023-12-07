@@ -70,7 +70,7 @@ fn print_message(msg: &Message) -> Option<()> {
     Some(())
 }
 
-fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
+pub fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
     let mut stdout = io::stdout();
     crossterm::execute!(stdout, crossterm::cursor::MoveLeft(bytes_back))?;
     crossterm::execute!(stdout, Clear(ClearType::FromCursorDown))?;
@@ -149,30 +149,48 @@ where
 
         println!("\n{}", "<Assistant>".blue().bold().underline());
 
-        let mut message_content = String::new();
+        // holds the raw message, applies no formatting changes
+        // this is what is stored in the db
+        let mut message_raw_content = String::new();
 
+        // holds the message as present in the output buffer
+        // including alterations to formatting
+        let mut message_printed_content = String::new();
+
+        //state flag for if we're in the middle of a code block
         let mut is_block = false;
+
         let mut block_bytes = 0usize;
         let mut block_start = 0usize;
 
         while let Some(content) = stream.next().await {
             if let Some(token) = content? {
-                message_content.push_str(&token);
+                message_raw_content.push_str(&token);
+                message_printed_content.push_str(&token);
+
                 stdout.write_all(token.as_bytes())?;
 
-                let block_border = token.trim().contains(BLOCK_DELIMITER);
+                // state flag for if we're at the boundary of a code block
+                let block_border = message_raw_content.trim().ends_with(BLOCK_DELIMITER);
 
                 match (is_block, block_border) {
+                    // when entering a block,
+                    // record the byte offset from the start as block_start
                     (false, true) => {
                         is_block = true;
-                        block_start = message_content.len() - token.len();
+                        block_start = message_printed_content.len() - token.len();
                     }
                     (true, false) => (),
+
+                    // End of a block.
                     (true, true) => {
                         is_block = false;
 
-                        let block_slice = &message_content[block_start..];
+                        // get a slice from the start of the block to the end of
+                        // the output buffer's contents
+                        let block_slice = &message_printed_content[block_start..];
 
+                        // parse the slice into a CodeBlock struct
                         let language = block_slice
                             .lines()
                             .next()
@@ -196,12 +214,21 @@ where
                         delete_bytes_back(block_slice.len() as u16)?;
                         io::stdout().flush()?;
 
-                        io::stdout().write_all(
-                            code_block
-                                .pretty_print_str(code_blocks.len() + 1)?
-                                .as_bytes(),
-                        )?;
-                        code_blocks.push(dbg!(code_block));
+                        let block_pretty_printed =
+                            code_block.pretty_print_str(code_blocks.len() + 1)?;
+
+                        io::stdout().write_all(block_pretty_printed.as_bytes())?;
+                        io::stdout().flush()?;
+
+                        // remove the unformatted block from the raw content buffer,
+                        // and replace it with the pretty printed one.
+                        // This is necessary to calculate the byte offsets for the next block
+                        // otherwise we'd be out of sync with the actual output as seen.
+                        message_raw_content = message_raw_content[..block_start].into();
+                        message_raw_content.push_str(&block_pretty_printed);
+
+                        // add the code block to the collection
+                        code_blocks.push(code_block);
                     }
                     _ => (),
                 }
@@ -210,8 +237,10 @@ where
             }
         }
 
+        // add the new message to this thread and session
+        // then save to the db
         let new_message = Message {
-            content: message_content,
+            content: message_raw_content,
             role: Role::Assistant,
             timestamp: Utc::now(),
             ..Default::default()
