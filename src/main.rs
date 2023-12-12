@@ -3,24 +3,30 @@ use std::io::{self, Read, Write};
 use crossterm::QueueableCommand;
 use ctrlc::set_handler;
 use gpt::cli::run_cli;
-use gpt::session::{stream_user_message, Session, Thread};
+use gpt::session::{stream_thread_reply, Message, Session, Thread};
+use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {
-    let mut session = Session::new_dummy()?;
-    let thread_id = session.new_thread("You are a helpful assistant")?;
-    let thread = session.thread_by_id(thread_id).unwrap();
+    App::run()?;
 
-    let mut rx = stream_user_message(
-        "What is the southernmost national capital in the world?",
-        &thread,
-    )?;
+    // let mut session = Session::new_dummy()?;
+    // let thread_id = session.new_thread("You are a helpful assistant")?;
 
-    let mut stdout = std::io::stdout();
+    // session
+    //     .thread_by_id_mut(thread_id)
+    //     .unwrap()
+    //     .add_message(Message::new_user(
+    //         "Are there any warm-blooded animals that aren't mammals or birds?",
+    //     ));
 
-    while let Some(reply) = rx.recv()? {
-        stdout.write_all(reply.as_bytes())?;
-        stdout.flush()?;
-    }
+    // let rx = stream_thread_reply(session.thread_by_id(thread_id).unwrap())?;
+
+    // let mut stdout = std::io::stdout();
+
+    // while let Some(reply) = rx.recv()? {
+    //     stdout.write_all(reply.as_bytes())?;
+    //     stdout.flush()?;
+    // }
 
     Ok(())
 }

@@ -94,6 +94,32 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn new_user(text: &str) -> Self {
+        let role = Role::User;
+        let timestamp = Utc::now();
+        let content = text.to_string();
+
+        Self {
+            role,
+            timestamp,
+            content,
+            ..Default::default()
+        }
+    }
+
+    pub fn new_asst(text: &str) -> Self {
+        let role = Role::Assistant;
+        let timestamp = Utc::now();
+        let content = text.to_string();
+
+        Self {
+            role,
+            timestamp,
+            content,
+            ..Default::default()
+        }
+    }
+
     pub fn new(role: Role, content: String, timestamp_epoch: f64) -> Self {
         let timestamp_secs = f64::floor(timestamp_epoch) as i64;
         let timestamp_nanos = f64::fract(timestamp_epoch) * 1_000_000f64;
@@ -405,6 +431,12 @@ impl Session<Sink> {
     }
 }
 
+impl Default for Session<Sink> {
+    fn default() -> Self {
+        Self::new(sink()).expect("Session initialization failed")
+    }
+}
+
 impl<T> Session<T>
 where
     T: Write,
@@ -686,19 +718,18 @@ pub fn _stream_user_message(
 
     Ok(rx)
 }
-pub fn stream_user_message(msg: &str, thread: &Thread) -> anyhow::Result<Receiver<Option<String>>> {
-    let user_message = Message {
-        role: Role::User,
-        content: msg.trim().into(),
-        timestamp: Utc::now(),
-        ..Default::default()
-    };
+pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<String>>> {
+    if !thread.last_message().map(|m| m.is_user()).unwrap_or(false) {
+        return Err(anyhow::format_err!(
+            "The most recent messege in the thread must be from a user"
+        ));
+    }
 
     let client = create_client()?;
-    let mut thread = thread.clone();
-    thread.add_message(user_message);
 
     let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+
+    let thread_json = thread.as_json_body();
 
     let _ = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -707,11 +738,7 @@ pub fn stream_user_message(msg: &str, thread: &Thread) -> anyhow::Result<Receive
             .expect("Async runtime failed to start");
 
         let res: anyhow::Result<()> = rt.block_on(async move {
-            let response = client
-                .post(OPENAI_URL)
-                .json(&thread.as_json_body())
-                .send()
-                .await?;
+            let response = client.post(OPENAI_URL).json(&thread_json).send().await?;
 
             let mut stream = response
                 .error_for_status()?
