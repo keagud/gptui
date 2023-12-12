@@ -6,8 +6,7 @@ use gpt::app;
 use gpt::cli::run_cli;
 use gpt::session::{stream_user_message, Session, Thread};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut session = Session::new_dummy()?;
     let thread_id = session.new_thread("You are a helpful assistant")?;
     let thread = session.thread_by_id(thread_id).unwrap();
@@ -19,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut stdout = std::io::stdout();
 
-    while let Some(reply) = rx.recv().await {
+    while let Some(reply) = rx.recv()? {
         stdout.write_all(reply.as_bytes())?;
         stdout.flush()?;
     }
