@@ -2,7 +2,6 @@ use std::io::{self, Read, Write};
 
 use crossterm::QueueableCommand;
 use ctrlc::set_handler;
-use gpt::app;
 use gpt::cli::run_cli;
 use gpt::session::{stream_user_message, Session, Thread};
 
