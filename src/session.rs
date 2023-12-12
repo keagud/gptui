@@ -19,6 +19,7 @@ use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
@@ -626,6 +627,61 @@ where
     }
 }
 
+pub fn stream_user_message(msg: &str, thread: &Thread) -> anyhow::Result<UnboundedReceiver<String>> {
+    let user_message = Message {
+        role: Role::User,
+        content: msg.trim().into(),
+        timestamp: Utc::now(),
+        ..Default::default()
+    };
+
+    let client = create_client()?;
+    let mut thread = thread.clone();
+    thread.add_message(user_message);
+
+    let (tx, rx) = unbounded_channel::<String>();
+
+    let handle: tokio::task::JoinHandle<Result<(), anyhow::Error>> = tokio::spawn(async move {
+        let response = client
+            .post(OPENAI_URL)
+            .json(&thread.as_json_body())
+            .send()
+            .await?;
+
+        let mut stream = response
+            .error_for_status()?
+            .bytes_stream()
+            .map_err(|e| anyhow::anyhow!(e));
+
+        let mut buf = String::new();
+
+        let mut message_tokens = String::new();
+
+        while let Some(bytes_result) = stream.next().await {
+            buf.push_str(&String::from_utf8_lossy(&bytes_result?).to_string());
+
+            let (parsed, remainder) = try_parse_chunks(&buf)?;
+
+            buf.clear();
+
+            if let Some(remainder) = remainder {
+                buf.push_str(&remainder);
+            }
+
+            if let Some(chunks) = parsed {
+                for chunk in chunks.iter() {
+                    if let Some(s) = chunk.token() {
+                        tx.send(s);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    });
+
+    Ok(rx)
+}
 #[cfg(test)]
 mod test {
     use super::*;
