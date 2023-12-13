@@ -32,6 +32,23 @@ const FPS: f64 = 30.0;
 
 use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
+fn extend_text<'a>(text1: Text<'a>, text2: Text<'a>) -> Text<'a> {
+    let mut t = text1.clone();
+    t.extend(text2.lines.into_iter());
+    t
+}
+
+macro_rules! concat_text {
+    ($t1:expr,$t2:expr) => {{
+        extend_text($t1, $t2)
+    }};
+
+    ($t1:expr, $t2:expr, $($rest:expr),+) => {
+        { concat_text!(concat_text!($t1, $t2), $($rest),+) }
+
+    };
+}
+
 pub struct App {
     should_quit: bool,
     session: SessionHandle,
@@ -203,22 +220,6 @@ impl App {
 
         let mut msgs_formatted = self.thread()?.tui_formatted_messages()?;
 
-        let mut messages: Vec<String> = self
-            .thread()?
-            .messages()
-            .iter()
-            .filter(|m| !m.is_system())
-            .map(|msg| {
-                let sender = match msg.role {
-                    Role::User => "User",
-                    Role::Assistant => "Assistant",
-                    _ => unreachable!(),
-                };
-
-                format!("{}: \n{}\n", sender, msg.content)
-            })
-            .collect();
-
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
                 Role::Assistant.tui_display_header().unwrap(),
@@ -226,10 +227,7 @@ impl App {
             ])];
 
             incoming_lines.push(Line::raw(&self.incoming_message));
-
             msgs_formatted.push(Text::from(incoming_lines));
-
-            messages.push(format!("Assistant: \n{}\n", &self.incoming_message))
         }
 
         let scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
@@ -239,7 +237,6 @@ impl App {
         } else {
             Style::new().blue()
         };
-
 
         let msg_lines = msgs_formatted
             .into_iter()
@@ -253,12 +250,14 @@ impl App {
 
         frame.render_widget(chat_window, chunks[0]);
 
-        let input = Paragraph::new(self.user_message.as_str()).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(box_color)
-                .border_type(ratatui::widgets::BorderType::Thick),
-        );
+        let input = Paragraph::new(self.user_message.as_str())
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(box_color)
+                    .border_type(ratatui::widgets::BorderType::Thick),
+            );
 
         frame.render_widget(input, chunks[1]);
 
