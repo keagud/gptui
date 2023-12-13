@@ -1,13 +1,13 @@
 use std::io::{self, Read, Write};
 
 use crossterm::QueueableCommand;
-use ctrlc::set_handler;
 use gpt::cli::run_cli;
 use gpt::session::{stream_thread_reply, Message, Session, Thread};
 use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {
-    App::run()?;
+    let mut app = App::new("You are a helpful assistant").unwrap();
+    app.run().unwrap();
 
     // let mut session = Session::new_dummy()?;
     // let thread_id = session.new_thread("You are a helpful assistant")?;

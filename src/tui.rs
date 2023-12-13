@@ -1,10 +1,14 @@
-use std::{default, sync::mpsc::Receiver};
+use crossbeam_channel::{Receiver, Sender};
+use itertools::Itertools;
 
 use ratatui::{
     prelude::{Constraint, CrosstermBackend, Direction, Layout, Terminal},
+    style::{Color, Style, Stylize},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
+use std::default;
+use uuid::Uuid;
 
 use crossterm::{
     event::{
@@ -17,11 +21,13 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
+use ctrlc::set_handler;
+
 type SessionHandle = Session<std::io::Sink>;
 type ReplyRx = Receiver<Option<String>>;
 type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
 
-const FPS: f64 = 30f64;
+const FPS: f64 = 30.0;
 
 use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
@@ -60,30 +66,37 @@ impl Default for App {
     }
 }
 
-impl App {
-    fn new() -> Self {
-        Self::default()
-    }
+macro_rules! thread_missing {
+    ($opt:expr) => {
+        $opt.ok_or_else(|| anyhow::format_err!("Not connected to a thread"))
+    };
+}
 
-    fn messages(&self) -> Option<Vec<&Message>> {
+impl App {
+    fn messages(&self) -> anyhow::Result<Vec<&Message>> {
         self.thread().map(|t| t.messages())
     }
-    fn thread(&self) -> Option<&Thread> {
+    fn thread(&self) -> anyhow::Result<&Thread> {
+        thread_missing! {
         self.thread_id.and_then(|id| self.session.thread_by_id(id))
+        }
     }
 
-    fn thread_mut(&mut self) -> Option<&mut Thread> {
-        self.thread_id
-            .and_then(|id| self.session.thread_by_id_mut(id))
+    fn thread_mut(&mut self) -> anyhow::Result<&mut Thread> {
+        thread_missing! {
+            self
+        .thread_id
+        .and_then(|id| self.session.thread_by_id_mut(id))
+        }
     }
 
-    fn startup() -> anyhow::Result<()> {
+    pub fn startup() -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen)?;
         Ok(())
     }
 
-    fn shutdown() -> anyhow::Result<()> {
+    pub fn shutdown() -> anyhow::Result<()> {
         execute!(std::io::stderr(), LeaveAlternateScreen)?;
         disable_raw_mode()?;
         Ok(())
@@ -123,10 +136,9 @@ impl App {
                 KeyCode::Enter => {
                     if !self.user_message.is_empty() {
                         let new_message = Message::new_user(&self.user_message);
-                        self.thread_mut().unwrap().add_message(new_message);
+                        self.thread_mut()?.add_message(new_message);
 
-                        let rx = stream_thread_reply(&self.thread().unwrap())?;
-                        self.reply_rx = Some(rx);
+                        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
 
                         self.user_message.clear();
                     }
@@ -144,18 +156,22 @@ impl App {
     }
 
     fn update_recieving(&mut self) -> anyhow::Result<()> {
-        if let Some(ref rx) = self.reply_rx {
-            match rx.recv()? {
-                Some(chunk) => {
-                    self.incoming_message.push_str(&chunk);
-                }
-                None => {
-                    self.reply_rx = None;
+        if let Some(chunks) = self
+            .reply_rx
+            .as_ref()
+            .map(|ref rx| rx.try_iter().collect_vec())
+        {
+            for chunk in chunks.into_iter() {
+                match chunk {
+                    Some(s) => self.incoming_message.push_str(&s),
+                    None => {
+                        let new_msg = Message::new_asst(&self.incoming_message);
+                        self.thread_mut()?.add_message(new_msg);
+                        self.incoming_message.clear();
 
-                    let new_msg = Message::new_asst(&self.incoming_message);
-                    self.thread_mut().unwrap().add_message(new_msg);
-
-                    self.incoming_message.clear();
+                        self.reply_rx.take().map(|rx| drop(rx));
+                        break;
+                    }
                 }
             }
         }
@@ -188,9 +204,17 @@ impl App {
             .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
             .split(frame.size());
 
+        let first_msg = self
+            .thread()
+            .unwrap()
+            .first_message()
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
+
         let mut messages: Vec<String> = self
+            .thread()
+            .unwrap()
             .messages()
-            .unwrap_or_default()
             .iter()
             .filter(|m| !m.is_system())
             .map(|msg| {
@@ -200,47 +224,70 @@ impl App {
                     _ => unreachable!(),
                 };
 
-                format!("{}: {}\n", sender, msg.content)
+                format!("{}: \n{}\n", sender, msg.content)
             })
             .collect();
 
         if self.is_recieving() {
-            messages.push(format!("Assistant: {}\n", &self.incoming_message))
+            messages.push(format!("Assistant: \n{}\n", &self.incoming_message))
         }
 
         let scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
 
-        let f = self
-            .thread_id
-            .and_then(|id| self.session.thread_by_id(id))
-            .and_then(|t| t.first_message())
-            .map(|m| m.content.to_owned())
-            .unwrap_or_default();
+        let box_color = if self.is_recieving() {
+            Style::new().white()
+        } else {
+            Style::new().blue()
+        };
 
         let chat_window = Paragraph::new(messages.join("\n"))
-            .block(Block::default().borders(Borders::ALL).title(f))
-            .wrap(Wrap { trim: true })
-            .scroll((scroll, 0));
+            .block(Block::default().borders(Borders::ALL).title(first_msg))
+            .wrap(Wrap { trim: true });
 
         frame.render_widget(chat_window, chunks[0]);
 
-        let input = Paragraph::new(self.user_message.as_str())
-            .block(Block::default().borders(Borders::ALL).title("Input"));
+        let input = Paragraph::new(self.user_message.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(box_color)
+                .border_type(ratatui::widgets::BorderType::Thick),
+        );
 
         frame.render_widget(input, chunks[1]);
     }
 
-    pub fn run() -> anyhow::Result<()> {
-        let mut app = App::new();
+    pub fn with_thread(session: SessionHandle, thread_id: Uuid) -> Self {
+        Self {
+            session,
+            thread_id: Some(thread_id),
+            ..Default::default()
+        }
+    }
+
+    pub fn new(prompt: &str) -> anyhow::Result<Self> {
+        let mut session = SessionHandle::new_dummy()?;
+        let thread_id = Some(session.new_thread(prompt)?);
+
+        Ok(Self {
+            session,
+            thread_id,
+            ..Default::default()
+        })
+    }
+
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        set_handler(|| {
+            App::shutdown();
+        })?;
 
         let backend = CrosstermBackend::new(std::io::stderr());
 
         let mut terminal = CrosstermTerminal::new(backend)?;
         App::startup()?;
 
-        while !app.should_quit {
-            app.update()?;
-            terminal.draw(|frame| app.ui(frame))?;
+        while !self.should_quit {
+            self.update()?;
+            terminal.draw(|frame| self.ui(frame))?;
         }
 
         App::shutdown()?;
