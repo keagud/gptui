@@ -94,6 +94,8 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn tui_display(&self) {}
+
     pub fn new_user(text: &str) -> Self {
         let role = Role::User;
         let timestamp = Utc::now();
@@ -236,7 +238,7 @@ impl CodeBlock {
     pub fn as_raw(&self) -> String {
         format!(
             "```{}\n{}\n```",
-            &self.language.as_deref().unwrap_or("".into()),
+            &self.language.as_deref().unwrap_or(""),
             &self.content
         )
     }
@@ -692,7 +694,7 @@ pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<St
             let mut message_tokens = String::new();
 
             while let Some(bytes_result) = stream.next().await {
-                buf.push_str(&String::from_utf8_lossy(&bytes_result?).to_string());
+                buf.push_str(String::from_utf8_lossy(&bytes_result?).as_ref());
 
                 let (parsed, remainder) = try_parse_chunks(&buf)?;
 

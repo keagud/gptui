@@ -1,8 +1,3 @@
-use std::io::{self, Read, Write};
-
-use crossterm::QueueableCommand;
-use gpt::cli::run_cli;
-use gpt::session::{stream_thread_reply, Message, Session, Thread};
 use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {

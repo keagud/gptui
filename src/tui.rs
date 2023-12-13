@@ -31,17 +31,10 @@ const FPS: f64 = 30.0;
 
 use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
-enum AppState {
-    AwaitingSend,
-    AwaitingReply,
-    Recieving,
-}
-
 pub struct App {
     should_quit: bool,
     session: SessionHandle,
     thread_id: Option<uuid::Uuid>,
-    state: AppState,
     reply_rx: Option<ReplyRx>,
     incoming_message: String,
     user_message: String,
@@ -57,7 +50,6 @@ impl Default for App {
             session: Default::default(),
             thread_id: Default::default(),
             reply_rx: Default::default(),
-            state: AppState::AwaitingSend,
             incoming_message: String::new(),
             user_message: String::new(),
             chat_scroll: 0,
@@ -106,8 +98,8 @@ impl App {
         if let Event::Key(
             key @ KeyEvent {
                 kind: event::KeyEventKind::Press,
-                code: key_code @ _,
-                modifiers: key_modifiers @ _,
+                code: key_code,
+                modifiers: key_modifiers,
                 ..
             },
         ) = crossterm::event::read()?
@@ -156,11 +148,7 @@ impl App {
     }
 
     fn update_recieving(&mut self) -> anyhow::Result<()> {
-        if let Some(chunks) = self
-            .reply_rx
-            .as_ref()
-            .map(|ref rx| rx.try_iter().collect_vec())
-        {
+        if let Some(chunks) = self.reply_rx.as_ref().map(|rx| rx.try_iter().collect_vec()) {
             for chunk in chunks.into_iter() {
                 match chunk {
                     Some(s) => self.incoming_message.push_str(&s),
@@ -169,7 +157,9 @@ impl App {
                         self.thread_mut()?.add_message(new_msg);
                         self.incoming_message.clear();
 
-                        self.reply_rx.take().map(|rx| drop(rx));
+                        if let Some(a) = self.reply_rx.take() {
+                            drop(a)
+                        }
                         break;
                     }
                 }
