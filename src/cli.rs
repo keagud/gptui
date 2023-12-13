@@ -105,7 +105,7 @@ where
                 println!("{}", "<Assistant>".blue().bold().underline());
 
                 let (annotated_content, blocks) =
-                    msg.get_content_annotations(&mut code_block_counter);
+                    msg.formatted_content(&mut code_block_counter);
 
                 println!("{}", annotated_content);
 

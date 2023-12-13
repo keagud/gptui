@@ -1,3 +1,4 @@
+use ansi_to_tui::IntoText;
 use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -6,6 +7,8 @@ use crossbeam_channel::{Receiver, Sender};
 use futures::{Stream, StreamExt};
 use futures_util::{pin_mut, Future, TryStreamExt};
 use itertools::Itertools;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -17,7 +20,7 @@ use std::io::{self, sink, Sink, Stdout, Write};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Style, ThemeSet};
+use syntect::highlighting::{Style as SyntaxStyle, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
@@ -63,6 +66,26 @@ pub enum Role {
 }
 
 impl Role {
+    pub fn tui_display_header(&self) -> Option<Span> {
+        let header = match self {
+            Role::User => Span::styled(
+                "User",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Role::Assistant => Span::styled(
+                "Assistant",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Role::System => return None,
+        };
+
+        Some(header)
+    }
+
     pub fn to_num(&self) -> usize {
         match self {
             Role::System => 1,
@@ -94,8 +117,6 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn tui_display(&self) {}
-
     pub fn new_user(text: &str) -> Self {
         let role = Role::User;
         let timestamp = Utc::now();
@@ -158,10 +179,7 @@ impl Message {
         self.role == Role::System
     }
 
-    pub fn get_content_annotations(
-        &self,
-        index: &mut usize,
-    ) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
+    pub fn formatted_content(&self, index: &mut usize) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
         let mut blocks = Vec::new();
 
         let replaced = CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
@@ -179,7 +197,8 @@ impl Message {
                 ""
             };
 
-            let annotated = format!("```{}\n{}\n```({})\n", lang, &block.content, index);
+            let annotated = block.pretty_print_str(*index).unwrap();
+
             *index += 1;
 
             blocks.push(block);
@@ -210,7 +229,7 @@ impl CodeBlock {
         let mut formatted_string = String::new();
 
         for line in LinesWithEndings::from(&self.content) {
-            let ranges: Vec<(Style, &str)> = hl.highlight_line(line, &SYNTAX_SET)?;
+            let ranges: Vec<(SyntaxStyle, &str)> = hl.highlight_line(line, &SYNTAX_SET)?;
             let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
             formatted_string.push_str(&escaped);
         }
@@ -281,6 +300,33 @@ impl Thread {
             .expect("At least one message")
             .content
             .as_str()
+    }
+
+    pub fn tui_formatted_messages(&self) -> anyhow::Result<Vec<Text>> {
+        let mut msgs_buf: Vec<Text> = Vec::new();
+        let mut block_counter = 0usize;
+        let mut all_blocks = Vec::new();
+
+        for msg in self.messages().iter().filter(|m| !m.is_system()) {
+            let header_line = Line::from(vec![msg.role.tui_display_header().unwrap(), "\n".into()]);
+
+            let (text, blocks) = msg.formatted_content(&mut block_counter);
+
+            if let Some(blocks) = blocks {
+                all_blocks.push(blocks);
+            }
+
+            let text_fmt = text.to_string().into_text()?;
+
+            let amended_lines = [header_line]
+                .into_iter()
+                .chain(text_fmt.lines.into_iter())
+                .collect_vec();
+
+            msgs_buf.push(Text::from(amended_lines));
+        }
+
+        Ok(msgs_buf)
     }
 
     pub fn str_id(&self) -> String {

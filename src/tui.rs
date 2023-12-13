@@ -4,6 +4,7 @@ use itertools::Itertools;
 use ratatui::{
     prelude::{Constraint, CrosstermBackend, Direction, Layout, Terminal},
     style::{Color, Style, Stylize},
+    text::{Line, Text},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -187,7 +188,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&self, frame: &mut Frame) {
+    fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
@@ -195,15 +196,15 @@ impl App {
             .split(frame.size());
 
         let first_msg = self
-            .thread()
-            .unwrap()
+            .thread()?
             .first_message()
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
+        let mut msgs_formatted = self.thread()?.tui_formatted_messages()?;
+
         let mut messages: Vec<String> = self
-            .thread()
-            .unwrap()
+            .thread()?
             .messages()
             .iter()
             .filter(|m| !m.is_system())
@@ -219,6 +220,15 @@ impl App {
             .collect();
 
         if self.is_recieving() {
+            let mut incoming_lines = vec![Line::from(vec![
+                Role::Assistant.tui_display_header().unwrap(),
+                "\n".into(),
+            ])];
+
+            incoming_lines.push(Line::raw(&self.incoming_message));
+
+            msgs_formatted.push(Text::from(incoming_lines));
+
             messages.push(format!("Assistant: \n{}\n", &self.incoming_message))
         }
 
@@ -230,7 +240,14 @@ impl App {
             Style::new().blue()
         };
 
-        let chat_window = Paragraph::new(messages.join("\n"))
+
+        let msg_lines = msgs_formatted
+            .into_iter()
+            .map(|m| m.lines)
+            .flatten()
+            .collect_vec();
+
+        let chat_window = Paragraph::new(msg_lines)
             .block(Block::default().borders(Borders::ALL).title(first_msg))
             .wrap(Wrap { trim: true });
 
@@ -244,6 +261,8 @@ impl App {
         );
 
         frame.render_widget(input, chunks[1]);
+
+        Ok(())
     }
 
     pub fn with_thread(session: SessionHandle, thread_id: Uuid) -> Self {
@@ -277,7 +296,8 @@ impl App {
 
         while !self.should_quit {
             self.update()?;
-            terminal.draw(|frame| self.ui(frame))?;
+
+            terminal.draw(|frame| self.ui(frame).unwrap())?;
         }
 
         App::shutdown()?;
