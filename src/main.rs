@@ -1,8 +1,8 @@
+use gpt::cli::run_cli;
 use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {
-    let mut app = App::new("You are a helpful assistant").unwrap();
-    app.run().unwrap();
+    run_cli()?;
 
     // let mut session = Session::new_dummy()?;
     // let thread_id = session.new_thread("You are a helpful assistant")?;

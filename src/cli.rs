@@ -14,6 +14,7 @@ use futures_util::pin_mut;
 use itertools::Itertools;
 use std::io::{self, Read, Write};
 
+use crate::tui::App;
 const DEFAULT_PROMPT: &str = r#"You are a helpful assistant"#;
 const INPUT_INDICATOR: &str = ">> ";
 const BLOCK_DELIMITER: &str = r"```";
@@ -104,8 +105,7 @@ where
             Role::Assistant => {
                 println!("{}", "<Assistant>".blue().bold().underline());
 
-                let (annotated_content, blocks) =
-                    msg.formatted_content(&mut code_block_counter);
+                let (annotated_content, blocks) = msg.formatted_content(&mut code_block_counter);
 
                 println!("{}", annotated_content);
 
@@ -259,7 +259,7 @@ where
     Ok(())
 }
 
-pub async fn run_cli() -> anyhow::Result<()> {
+pub fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let mut session = Session::new_dummy()?;
     session.load_threads()?;
@@ -292,7 +292,8 @@ pub async fn run_cli() -> anyhow::Result<()> {
                 .thread_by_id(thread_id)
                 .expect("Could not get thread from id");
 
-            run_shell(&mut session, thread_id).await?;
+            let mut app = App::with_thread(session, thread_id);
+            app.run()?;
         }
         Commands::New { prompt } => {
             let prompt_str = match prompt {
@@ -302,7 +303,8 @@ pub async fn run_cli() -> anyhow::Result<()> {
 
             let new_thread_id = session.new_thread(prompt_str)?;
 
-            run_shell(&mut session, new_thread_id).await?;
+            let mut app = App::with_thread(session, new_thread_id);
+            app.run()?;
         }
     };
 

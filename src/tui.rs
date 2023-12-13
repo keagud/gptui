@@ -26,9 +26,12 @@ use ctrlc::set_handler;
 
 type SessionHandle = Session<std::io::Sink>;
 type ReplyRx = Receiver<Option<String>>;
-type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>;
+
+type Backend = ratatui::backend::CrosstermBackend<std::io::Stderr>;
+type CrosstermTerminal = ratatui::Terminal<Backend>;
 
 const FPS: f64 = 30.0;
+const SCROLL_STEP: usize = 1;
 
 use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
@@ -154,6 +157,14 @@ impl App {
                     }
                 }
 
+                KeyCode::Up => {
+                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
+                }
+
+                KeyCode::Down => {
+                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
+                }
+
                 _ => (),
             }
         }
@@ -205,7 +216,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
+    fn ui(&self, frame: &mut Frame<Backend>) -> anyhow::Result<()> {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
@@ -226,8 +237,8 @@ impl App {
                 "\n".into(),
             ])];
 
-            incoming_lines.push(Line::raw(&self.incoming_message));
-            msgs_formatted.push(Text::from(incoming_lines));
+            // incoming_lines.push(Line::raw(&self.incoming_message));
+            // msgs_formatted.push(Text::from(incoming_lines));
         }
 
         let scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
@@ -244,9 +255,24 @@ impl App {
             .flatten()
             .collect_vec();
 
-        let chat_window = Paragraph::new(msg_lines)
+        let msgs_text = Text::from(msg_lines);
+
+        let window_height = chunks[0].height as usize;
+
+        let scroll: u16 = if window_height > msgs_text.height() {
+            // if window is larger than text, no need to scroll
+            0
+        } else {
+            // self.chat_scroll is the number of lines to scroll up from the bottom
+            //
+            //
+            msgs_text.height().saturating_sub(self.chat_scroll) as u16
+        };
+
+        let chat_window = Paragraph::new(msgs_text)
             .block(Block::default().borders(Borders::ALL).title(first_msg))
-            .wrap(Wrap { trim: true });
+            .wrap(Wrap { trim: true })
+            .scroll((scroll, 0));
 
         frame.render_widget(chat_window, chunks[0]);
 

@@ -1,4 +1,3 @@
-use ansi_to_tui::IntoText;
 use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -6,7 +5,7 @@ use crossbeam_channel::bounded;
 use crossbeam_channel::{Receiver, Sender};
 use futures::{Stream, StreamExt};
 use futures_util::{pin_mut, Future, TryStreamExt};
-use itertools::Itertools;
+use itertools::{repeat_n, Itertools};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -23,6 +22,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style as SyntaxStyle, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
+use syntect_tui::into_span;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio_util::io::StreamReader;
 use uuid::Uuid;
@@ -179,32 +179,48 @@ impl Message {
         self.role == Role::System
     }
 
-    pub fn formatted_content(&self, index: &mut usize) -> (Cow<'_, str>, Option<Vec<CodeBlock>>) {
+    pub fn formatted_content(&self, index: &mut usize) -> (Text, Option<Vec<CodeBlock>>) {
         let mut blocks = Vec::new();
 
-        let replaced = CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
-            let block = CodeBlock {
-                language: cap.get(1).map(|s| s.as_str().to_owned()),
-                content: cap
-                    .get(2)
-                    .map(|s| s.as_str().to_owned())
-                    .unwrap_or_default(),
-            };
+        let block_marker = "__<BLOCK>__";
 
-            let lang = if let Some(ref s) = block.language {
-                s
-            } else {
-                ""
-            };
+        let with_blocks_extracted =
+            CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
+                let block = CodeBlock {
+                    language: cap.get(1).map(|s| s.as_str().to_owned()),
+                    content: cap
+                        .get(2)
+                        .map(|s| s.as_str().to_owned())
+                        .unwrap_or_default(),
+                };
 
-            let annotated = block.pretty_print_str(*index).unwrap();
+                let lang = if let Some(ref s) = block.language {
+                    s
+                } else {
+                    ""
+                };
 
-            *index += 1;
+                blocks.push(block);
 
-            blocks.push(block);
+                block_marker.into()
+            });
 
-            annotated
-        });
+
+        let mut formatted_lines: Vec<Line> = Vec::new();
+        let mut block_index = 0usize;
+
+        for msg_line in with_blocks_extracted.lines() {
+            if msg_line == block_marker {
+                blocks.get(block_index).map(|b| b.p
+
+
+
+
+
+            }
+
+
+        }
 
         let blocks_opt = if blocks.is_empty() {
             None
@@ -223,22 +239,33 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    pub fn pretty_print_str(&self, index: usize) -> anyhow::Result<String> {
+    pub fn highlighted_text(&self, index: usize) -> anyhow::Result<Text> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
-        let mut formatted_string = String::new();
+        let mut formatted_lines: Vec<Line> = Vec::new();
 
-        for line in LinesWithEndings::from(&self.content) {
-            let ranges: Vec<(SyntaxStyle, &str)> = hl.highlight_line(line, &SYNTAX_SET)?;
-            let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
-            formatted_string.push_str(&escaped);
+        let mut line_indents = self.content.lines().map(|ln| {
+            ln.chars()
+                .take_while(|c| c.is_whitespace())
+                .map(|c| match c {
+                    ' ' => 1,
+                    '\t' => 2,
+                    _ => 0,
+                })
+                .sum::<usize>()
+        });
+
+        for (line, indent) in LinesWithEndings::from(&self.content).zip(line_indents) {
+            let line_spans = hl
+                .highlight_line(line, &SYNTAX_SET)?
+                .into_iter()
+                .filter_map(|segment| into_span(segment).ok())
+                .collect_vec();
+
+            let line_hl = Line::from(line_spans);
         }
 
-        // reset terminal styles
-        formatted_string.push_str("\x1b[0m");
-
-        formatted_string.push_str(&format!("\n({index})\n"));
-        Ok(formatted_string)
+        todo!();
     }
 
     fn syntax(&self) -> &SyntaxReference {
