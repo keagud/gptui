@@ -16,6 +16,7 @@ use std::borrow::BorrowMut;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
@@ -114,6 +115,9 @@ pub struct Message {
 
     #[serde(skip)]
     pub annotated_content: Option<String>,
+
+    #[serde(skip)]
+    code_blocks: Vec<CodeBlock>,
 }
 
 impl Message {
@@ -179,13 +183,19 @@ impl Message {
         self.role == Role::System
     }
 
-    pub fn formatted_content(&self, index: &mut usize) -> (Text, Option<Vec<CodeBlock>>) {
-        let mut blocks = Vec::new();
+    pub fn formatted_content<'a>(&'a self) -> Text<'a> {
+        todo!()
+    }
+
+    pub fn update_blocks<'a>(
+        &'a mut self,
+        index: &mut usize,
+    ) -> anyhow::Result<(())> {
 
         let block_marker = "__<BLOCK>__";
 
-        let with_blocks_extracted =
-            CODEBLOCK_PATTERN.replace_all(&self.content, |cap: &regex::Captures<'_>| {
+        let with_blocks_extracted = CODEBLOCK_PATTERN
+            .replace_all(&self.content, |cap: &regex::Captures<'_>| {
                 let block = CodeBlock {
                     language: cap.get(1).map(|s| s.as_str().to_owned()),
                     content: cap
@@ -200,35 +210,26 @@ impl Message {
                     ""
                 };
 
-                blocks.push(block);
+                self.code_blocks.push(block);
 
-                block_marker.into()
-            });
-
+                block_marker
+            })
+            .to_string();
 
         let mut formatted_lines: Vec<Line> = Vec::new();
         let mut block_index = 0usize;
 
-        for msg_line in with_blocks_extracted.lines() {
+        for msg_line in with_blocks_extracted.lines().map(|s| s.to_string()) {
             if msg_line == block_marker {
-                blocks.get(block_index).map(|b| b.p
-
-
-
-
-
+                if let Some(block) = self.code_blocks.get(block_index) {
+                    formatted_lines.extend(block.highlighted_text(*index)?.lines.into_iter());
+                }
+            } else {
+                formatted_lines.push(msg_line.into());
             }
-
-
         }
 
-        let blocks_opt = if blocks.is_empty() {
-            None
-        } else {
-            Some(blocks)
-        };
-
-        (replaced, blocks_opt)
+        Ok(())
     }
 }
 
@@ -239,7 +240,7 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    pub fn highlighted_text(&self, index: usize) -> anyhow::Result<Text> {
+    pub fn highlighted_text<'a>(&'a self, index: usize) -> anyhow::Result<Text<'a>> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
         let mut formatted_lines: Vec<Line> = Vec::new();
@@ -300,9 +301,6 @@ pub struct Thread {
 
     #[serde(skip)]
     code_block_counts: usize,
-
-    #[serde(skip)]
-    code_blocks: HashMap<usize, CodeBlock>,
 }
 
 impl Thread {
@@ -337,17 +335,14 @@ impl Thread {
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
             let header_line = Line::from(vec![msg.role.tui_display_header().unwrap(), "\n".into()]);
 
-            let (text, blocks) = msg.formatted_content(&mut block_counter);
+            let text = msg.formatted_content();
 
-            if let Some(blocks) = blocks {
-                all_blocks.push(blocks);
-            }
-
-            let text_fmt = text.to_string().into_text()?;
+            all_blocks.extend(msg.code_blocks.iter().cloned());
 
             let amended_lines = [header_line]
                 .into_iter()
-                .chain(text_fmt.lines.into_iter())
+                .chain(text.lines.into_iter())
+                .chain(std::iter::once("\n".into()))
                 .collect_vec();
 
             msgs_buf.push(Text::from(amended_lines));
@@ -800,29 +795,6 @@ pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<St
 mod test {
     use super::*;
 
-    #[test]
-    pub fn test_block_print() {
-        let content = r#"
-        for i in range(10):
-            print(i)
-        "#
-        .into();
-
-        let expected = r#"[48;2;45;45;45m[38;2;211;208;200m
-[48;2;45;45;45m[38;2;211;208;200m        [48;2;45;45;45m[38;2;204;153;204mfor[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;211;208;200mi[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;204;153;204min[48;2;45;45;45m[38;2;211;208;200m [48;2;45;45;45m[38;2;102;204;204mrange[48;2;45;45;45m[38;2;211;208;200m([48;2;45;45;45m[38;2;249;145;87m10[48;2;45;45;45m[38;2;211;208;200m)[48;2;45;45;45m[38;2;211;208;200m:[48;2;45;45;45m[38;2;211;208;200m
-[48;2;45;45;45m[38;2;211;208;200m            [48;2;45;45;45m[38;2;102;204;204mprint[48;2;45;45;45m[38;2;211;208;200m([48;2;45;45;45m[38;2;211;208;200mi[48;2;45;45;45m[38;2;211;208;200m)[48;2;45;45;45m[38;2;211;208;200m
-[48;2;45;45;45m[38;2;211;208;200m        [0m
-(1)
-"#;
-
-        let test_block = CodeBlock {
-            language: Some("python".into()),
-            content,
-        };
-
-        let pretty = test_block.pretty_print_str(1).unwrap();
-        assert_eq!(pretty.as_str(), expected);
-    }
     #[test]
     fn test_parse_chunks() {
         let data = r#"
