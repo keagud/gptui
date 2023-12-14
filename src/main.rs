@@ -1,5 +1,4 @@
 use gpt::cli::run_cli;
-use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {
     run_cli()?;

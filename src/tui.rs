@@ -1,21 +1,21 @@
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 use itertools::Itertools;
 
 use ratatui::{
-    prelude::{Constraint, CrosstermBackend, Direction, Layout, Terminal},
-    style::{Color, Style, Stylize},
+    prelude::{Constraint, CrosstermBackend, Direction, Layout},
+    style::{Style, Stylize},
     text::{Line, Text},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
-use std::default;
+
 use uuid::Uuid;
 
 use crossterm::{
     event::{
         self,
-        Event::{self, Key},
-        KeyCode::{self, Char},
+        Event::{self},
+        KeyCode::{self},
         KeyEvent, KeyModifiers,
     },
     execute,
@@ -37,7 +37,7 @@ use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
 fn extend_text<'a>(text1: Text<'a>, text2: Text<'a>) -> Text<'a> {
     let mut t = text1.clone();
-    t.extend(text2.lines.into_iter());
+    t.extend(text2.lines);
     t
 }
 
@@ -117,7 +117,7 @@ impl App {
 
     fn update_awaiting_send(&mut self) -> anyhow::Result<()> {
         if let Event::Key(
-            key @ KeyEvent {
+            _key @ KeyEvent {
                 kind: event::KeyEventKind::Press,
                 code: key_code,
                 modifiers: key_modifiers,
@@ -229,10 +229,10 @@ impl App {
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let mut msgs_formatted = self.thread()?.tui_formatted_messages()?;
+        let msgs_formatted = self.thread()?.tui_formatted_messages()?;
 
         if self.is_recieving() {
-            let mut incoming_lines = vec![Line::from(vec![
+            let _incoming_lines = vec![Line::from(vec![
                 Role::Assistant.tui_display_header().unwrap(),
                 "\n".into(),
             ])];
@@ -241,7 +241,7 @@ impl App {
             // msgs_formatted.push(Text::from(incoming_lines));
         }
 
-        let scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
+        let _scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
 
         let box_color = if self.is_recieving() {
             Style::new().white()
@@ -251,8 +251,7 @@ impl App {
 
         let msg_lines = msgs_formatted
             .into_iter()
-            .map(|m| m.lines)
-            .flatten()
+            .flat_map(|m| m.lines)
             .collect_vec();
 
         let msgs_text = Text::from(msg_lines);

@@ -1,17 +1,15 @@
-use crate::session::{CodeBlock, Message, Role, Session, Thread};
+use crate::session::{Message, Role, Session};
 use anyhow;
 use anyhow::format_err;
-use arboard;
-use chrono::Utc;
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use crossterm::{
     self,
     terminal::{Clear, ClearType},
 };
-use futures::{Stream, StreamExt};
-use futures_util::pin_mut;
-use itertools::Itertools;
+use futures::StreamExt;
+
 use std::io::{self, Read, Write};
 
 use crate::tui::App;
@@ -33,7 +31,7 @@ enum Commands {
     Resume { index: i64 },
 }
 
-fn pprint(input: &str) {}
+fn pprint(_input: &str) {}
 
 fn clear_screen() -> anyhow::Result<()> {
     if cfg!(target_os = "windows") {
@@ -80,8 +78,6 @@ pub fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-
-
 pub fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let mut session = Session::new_dummy()?;
@@ -111,7 +107,7 @@ pub fn run_cli() -> anyhow::Result<()> {
                 .expect("Failed to fetch thread")
                 .to_owned();
 
-            let current_thread = session
+            let _current_thread = session
                 .thread_by_id(thread_id)
                 .expect("Could not get thread from id");
 
