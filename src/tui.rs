@@ -4,7 +4,7 @@ use itertools::Itertools;
 use ratatui::{
     prelude::{Constraint, CrosstermBackend, Direction, Layout},
     style::{Style, Stylize},
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -77,8 +77,7 @@ macro_rules! app_defaults {
         }
     }};
 
-    ($session:expr) => {
-        {
+    ($session:expr) => {{
         let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
         Self {
             should_quit: false,
@@ -90,8 +89,7 @@ macro_rules! app_defaults {
             chat_scroll: 0,
             tick_duration,
         }
-        }
-    };
+    }};
 }
 
 macro_rules! thread_missing {
@@ -192,9 +190,9 @@ impl App {
     }
 
     fn update_recieving(&mut self) -> anyhow::Result<()> {
-        if let Some(chunks) = self.reply_rx.as_ref().map(|rx| rx.try_iter().collect_vec()) {
-            for chunk in chunks.into_iter() {
-                match chunk {
+        if let Some(rx) = self.reply_rx.as_ref() {
+            {
+                match rx.recv()? {
                     Some(s) => self.incoming_message.push_str(&s),
                     None => {
                         let new_msg = Message::new_asst(&self.incoming_message);
@@ -204,7 +202,6 @@ impl App {
                         if let Some(a) = self.reply_rx.take() {
                             drop(a)
                         }
-                        break;
                     }
                 }
             }
@@ -244,19 +241,17 @@ impl App {
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let msgs_formatted = self.thread()?.tui_formatted_messages()?;
+        let mut msgs_formatted = self.thread()?.tui_formatted_messages()?;
 
         if self.is_recieving() {
-            let _incoming_lines = vec![Line::from(vec![
+            let mut incoming_lines = vec![Line::from(vec![
                 Role::Assistant.tui_display_header().unwrap(),
                 "\n".into(),
             ])];
 
-            // incoming_lines.push(Line::raw(&self.incoming_message));
-            // msgs_formatted.push(Text::from(incoming_lines));
+            incoming_lines.push(Line::from(Span::from(&self.incoming_message)));
+            msgs_formatted.push(Text::from(incoming_lines));
         }
-
-        let _scroll = chunks[0].height.saturating_sub(self.chat_scroll as u16);
 
         let box_color = if self.is_recieving() {
             Style::new().white()
@@ -306,14 +301,12 @@ impl App {
 
     pub fn with_thread(session: Session, thread_id: Uuid) -> Self {
         app_defaults!(session, thread_id)
-            }
+    }
 
     pub fn new(prompt: &str) -> anyhow::Result<Self> {
         let mut session = Session::new()?;
 
         Ok(app_defaults!(session))
-
-
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {

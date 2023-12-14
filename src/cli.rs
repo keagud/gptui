@@ -107,10 +107,6 @@ pub fn run_cli() -> anyhow::Result<()> {
                 .expect("Failed to fetch thread")
                 .to_owned();
 
-            let _current_thread = session
-                .thread_by_id(thread_id)
-                .expect("Could not get thread from id");
-
             let mut app = App::with_thread(session, thread_id);
             app.run()?;
         }
