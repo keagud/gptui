@@ -114,12 +114,13 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
 
     #[serde(skip)]
-    pub annotated_content: Option<String>,
+    code_blocks: Vec<CodeBlock>,
 
     #[serde(skip)]
-    code_blocks: Vec<CodeBlock>,
+    prose_content: String,
 }
 
+const BLOCK_MARKER: &str = "```__<BLOCK>__```";
 impl Message {
     pub fn new_user(text: &str) -> Self {
         let role = Role::User;
@@ -146,6 +147,7 @@ impl Message {
             ..Default::default()
         }
     }
+
 
     pub fn new(role: Role, content: String, timestamp_epoch: f64) -> Self {
         let timestamp_secs = f64::floor(timestamp_epoch) as i64;
@@ -183,16 +185,29 @@ impl Message {
         self.role == Role::System
     }
 
-    pub fn formatted_content<'a>(&'a self) -> Text<'a> {
-        todo!()
+    /// Get the text for this message as it will be displayed, with highlights and annotations
+    /// `index` is the value to start numbering the block annotations from
+    pub fn formatted_content<'a>(&'a self, index: &mut usize) -> anyhow::Result<Text<'a>> {
+        let mut formatted_lines: Vec<Line> = Vec::new();
+        let mut block_index = 0usize;
+
+        for msg_line in self.prose_content.lines() {
+            if msg_line.trim() == BLOCK_MARKER {
+                if let Some(block) = self.code_blocks.get(block_index) {
+                    formatted_lines.extend(block.highlighted_text(*index)?.lines.into_iter());
+                }
+            } else {
+                formatted_lines.push(msg_line.into());
+            }
+        }
+
+        Ok(Text::from(formatted_lines))
     }
 
-    pub fn update_blocks<'a>(
-        &'a mut self,
-        index: &mut usize,
-    ) -> anyhow::Result<(())> {
-
-        let block_marker = "__<BLOCK>__";
+    ///update code_blocks and prose_content to align with the message text
+    pub fn update_blocks(&mut self) -> anyhow::Result<(())> {
+        let mut blocks = Vec::new();
+        self.code_blocks.clear();
 
         let with_blocks_extracted = CODEBLOCK_PATTERN
             .replace_all(&self.content, |cap: &regex::Captures<'_>| {
@@ -210,24 +225,16 @@ impl Message {
                     ""
                 };
 
-                self.code_blocks.push(block);
+                blocks.push(block);
 
-                block_marker
+                BLOCK_MARKER
             })
             .to_string();
 
-        let mut formatted_lines: Vec<Line> = Vec::new();
-        let mut block_index = 0usize;
+        self.code_blocks.clear();
+        self.code_blocks.extend(blocks.into_iter());
 
-        for msg_line in with_blocks_extracted.lines().map(|s| s.to_string()) {
-            if msg_line == block_marker {
-                if let Some(block) = self.code_blocks.get(block_index) {
-                    formatted_lines.extend(block.highlighted_text(*index)?.lines.into_iter());
-                }
-            } else {
-                formatted_lines.push(msg_line.into());
-            }
-        }
+        self.prose_content = with_blocks_extracted;
 
         Ok(())
     }
@@ -335,7 +342,7 @@ impl Thread {
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
             let header_line = Line::from(vec![msg.role.tui_display_header().unwrap(), "\n".into()]);
 
-            let text = msg.formatted_content();
+            let text = msg.formatted_content(&mut block_counter)?;
 
             all_blocks.extend(msg.code_blocks.iter().cloned());
 
