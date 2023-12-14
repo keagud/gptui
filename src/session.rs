@@ -69,7 +69,7 @@ impl Thread {
         let mut all_blocks = Vec::new();
 
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
-            let header_line = Line::from(vec![msg.role.tui_display_header().unwrap(), "\n".into()]);
+            let header_line = Line::from(vec![msg.role.tui_display_header(), "\n".into()]);
 
             let text = msg.formatted_content(&mut block_counter)?;
 

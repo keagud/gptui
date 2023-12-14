@@ -249,11 +249,12 @@ impl App {
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
-                Role::Assistant.tui_display_header().unwrap(),
+                Role::Assistant.tui_display_header(),
                 "\n".into(),
             ])];
 
-            incoming_lines.push(Line::from(Span::from(&self.incoming_message)));
+            incoming_lines.extend(self.incoming_message.lines().map(|ln| Line::from(ln)));
+
             msgs_formatted.push(Text::from(incoming_lines));
         }
 
@@ -312,7 +313,7 @@ impl App {
 
     pub fn run(&mut self) -> anyhow::Result<()> {
         set_handler(|| {
-            App::shutdown();
+            App::shutdown().expect("Cleanup procedure failed");
         })?;
 
         let backend = CrosstermBackend::new(std::io::stderr());

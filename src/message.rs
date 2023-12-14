@@ -1,7 +1,7 @@
 use ansi_to_tui::IntoText;
 use anyhow::format_err;
 use chrono::{DateTime, Utc};
-use itertools::Itertools;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxReference;
 use syntect::util::LinesWithEndings;
+
+#[allow(unused)]
+use itertools::Itertools;
 
 #[allow(unused)]
 use futures::StreamExt;
@@ -51,8 +54,8 @@ pub enum Role {
 }
 
 impl Role {
-    pub fn tui_display_header(&self) -> Option<Span> {
-        let header = match self {
+    pub fn tui_display_header(&self) -> Span {
+         match self {
             Role::User => Span::styled(
                 "User",
                 Style::default()
@@ -65,10 +68,15 @@ impl Role {
                     .fg(Color::Blue)
                     .add_modifier(Modifier::UNDERLINED),
             ),
-            Role::System => return None,
-        };
+            Role::System => Span::styled(
+                "System",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        }
 
-        Some(header)
     }
 
     pub fn to_num(&self) -> usize {
