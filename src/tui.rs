@@ -129,14 +129,12 @@ impl App {
     }
 
     fn update_awaiting_send(&mut self) -> anyhow::Result<()> {
-        if let Event::Key(
-            _key @ KeyEvent {
-                kind: event::KeyEventKind::Press,
-                code: key_code,
-                modifiers: key_modifiers,
-                ..
-            },
-        ) = crossterm::event::read()?
+        if let Event::Key(KeyEvent {
+            kind: event::KeyEventKind::Press,
+            code: key_code,
+            modifiers: key_modifiers,
+            ..
+        }) = crossterm::event::read()?
         {
             match key_code {
                 KeyCode::Char('c') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
@@ -171,11 +169,11 @@ impl App {
                 }
 
                 KeyCode::Up => {
-                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
+                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
                 }
 
                 KeyCode::Down => {
-                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
+                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
                 }
 
                 _ => (),
@@ -228,7 +226,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&self, frame: &mut Frame<Backend>) -> anyhow::Result<()> {
+    fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)

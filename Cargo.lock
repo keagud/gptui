@@ -66,7 +66,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b0e348dcd256ba06d44d5deabc88a7c0e80ee7303158253ca069bcd9e9b7f57"
 dependencies = [
  "nom",
- "ratatui 0.24.0",
+ "ratatui",
  "thiserror",
 ]
 
@@ -460,12 +460,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "custom_error"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f8a51dd197fa6ba5b4dc98a990a43cc13693c23eb0089ebb0fcc1f04152bca6"
-
-[[package]]
 name = "darling"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -805,7 +799,7 @@ dependencies = [
  "futures-util",
  "itertools 0.12.0",
  "lazy_static",
- "ratatui 0.23.0",
+ "ratatui",
  "regex",
  "reqwest",
  "rusqlite",
@@ -815,7 +809,6 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "syntect",
- "syntect-tui",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1529,24 +1522,6 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
-dependencies = [
- "bitflags 2.4.1",
- "cassowary",
- "crossterm",
- "indoc",
- "itertools 0.11.0",
- "paste",
- "strum",
- "time",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
-name = "ratatui"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ebc917cfb527a566c37ecb94c7e3fd098353516fb4eb6bea17015ade0182425"
@@ -1559,6 +1534,7 @@ dependencies = [
  "lru",
  "paste",
  "strum",
+ "time",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -1959,17 +1935,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "syntect-tui"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b18ea8d726ebd9d0cf8ca218e23f02584bac35f5f5504e5bc4efcde576f33c25"
-dependencies = [
- "custom_error",
- "ratatui 0.23.0",
- "syntect",
-]
-
-[[package]]
 name = "system-configuration"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2188,7 +2153,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e38ced1f941a9cfc923fbf2fe6858443c42cc5220bfd35bdd3648371e7bd8e"
 dependencies = [
  "crossterm",
- "ratatui 0.24.0",
+ "ratatui",
  "unicode-width",
 ]
 
@@ -2607,18 +2572,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.30"
+version = "0.7.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "306dca4455518f1f31635ec308b6b3e4eb1b11758cefafc782827d0aa7acb5c7"
+checksum = "1c4061bedbb353041c12f413700357bec76df2c7e2ca8e4df8bac24c6bf68e3d"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.7.30"
+version = "0.7.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be912bf68235a88fbefd1b73415cb218405958d1655b2ece9035a19920bdf6ba"
+checksum = "b3c129550b3e6de3fd0ba67ba5c81818f9805e58b8d7fee80a3a59d2c9fc601a"
 dependencies = [
  "proc-macro2",
  "quote",

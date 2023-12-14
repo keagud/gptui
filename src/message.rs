@@ -1,3 +1,4 @@
+use ansi_to_tui::IntoText;
 use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -8,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxReference;
 use syntect::util::LinesWithEndings;
-use syntect_tui::into_span;
 
 #[allow(unused)]
 use futures::StreamExt;
@@ -31,7 +31,7 @@ lazy_static::lazy_static! {
 
 }
 
-const DEFAULT_THEME: &str = "base16-eighties.dark";
+const DEFAULT_THEME: &str = "base16-ocean.dark";
 
 #[allow(unused)]
 fn timestamp() -> f64 {
@@ -250,14 +250,24 @@ impl CodeBlock {
         });
 
         for line in LinesWithEndings::from(&self.content) {
-            let line_spans = hl
-                .highlight_line(line, &SYNTAX_SET)?
-                .into_iter()
-                .filter_map(|segment| into_span(segment).ok())
-                .collect_vec();
+            let ranges: Vec<(syntect::highlighting::Style, &str)> =
+                hl.highlight_line(line, &SYNTAX_SET).unwrap();
+            let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
 
-            let line_hl = Line::from(line_spans);
-            formatted_lines.push(line_hl);
+            let e = escaped.into_text()?;
+
+            formatted_lines.extend(e.lines.into_iter());
+
+            //            formatted_lines.extend(e.into_iter());
+
+            // let line_spans = hl
+            //     .highlight_line(line, &SYNTAX_SET)?
+            //     .into_iter()
+            //     .filter_map(|segment| into_span(segment).ok())
+            //     .collect_vec();
+
+            // let line_hl = Line::from(line_spans);
+            // formatted_lines.push(line_hl);
         }
 
         Ok(Text::from(formatted_lines))
