@@ -190,7 +190,6 @@ impl Message {
         Ok(Text::from(formatted_lines))
     }
 
-    // TODO make sure this is called on every new message initializiation
     ///update code_blocks and non_code_content to align with the message text
     pub fn update_blocks(&mut self) {
         let mut blocks = Vec::new();
@@ -237,37 +236,13 @@ impl CodeBlock {
 
         let mut formatted_lines: Vec<Line> = Vec::new();
 
-        #[allow(unused)]
-        let line_indents = self.content.lines().map(|ln| {
-            ln.chars()
-                .take_while(|c| c.is_whitespace())
-                .map(|c| match c {
-                    ' ' => 1,
-                    '\t' => 2,
-                    _ => 0,
-                })
-                .sum::<usize>()
-        });
-
         for line in LinesWithEndings::from(&self.content) {
             let ranges: Vec<(syntect::highlighting::Style, &str)> =
                 hl.highlight_line(line, &SYNTAX_SET).unwrap();
             let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
 
-            let e = escaped.into_text()?;
-
-            formatted_lines.extend(e.lines.into_iter());
-
-            //            formatted_lines.extend(e.into_iter());
-
-            // let line_spans = hl
-            //     .highlight_line(line, &SYNTAX_SET)?
-            //     .into_iter()
-            //     .filter_map(|segment| into_span(segment).ok())
-            //     .collect_vec();
-
-            // let line_hl = Line::from(line_spans);
-            // formatted_lines.push(line_hl);
+            formatted_lines.extend(escaped.into_text()?.lines.into_iter());
+            continue;
         }
 
         Ok(Text::from(formatted_lines))

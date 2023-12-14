@@ -169,11 +169,11 @@ impl App {
                 }
 
                 KeyCode::Up => {
-                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
+                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
                 }
 
                 KeyCode::Down => {
-                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
+                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
                 }
 
                 _ => (),
@@ -191,7 +191,13 @@ impl App {
         if let Some(rx) = self.reply_rx.as_ref() {
             {
                 match rx.recv()? {
-                    Some(s) => self.incoming_message.push_str(&s),
+                    Some(s) => {
+                        if s.contains('\n') {
+                            self.chat_scroll += SCROLL_STEP;
+                        }
+
+                        self.incoming_message.push_str(&s)
+                    }
                     None => {
                         let new_msg = Message::new_asst(&self.incoming_message);
                         self.thread_mut()?.add_message(new_msg);
@@ -217,7 +223,7 @@ impl App {
             }
 
             Some(_) => {
-                self.update_recieving();
+                self.update_recieving()?;
             }
 
             _ => (),
@@ -268,23 +274,20 @@ impl App {
 
         let scroll: u16 = if window_height > msgs_text.height() {
             // if window is larger than text, no need to scroll
-            0
+            0usize
         } else {
-            // self.chat_scroll is the number of lines to scroll up from the bottom
-            //
-            //
-            msgs_text.height().saturating_sub(self.chat_scroll) as u16
-        };
+            self.chat_scroll
+        } as u16;
 
         let chat_window = Paragraph::new(msgs_text)
             .block(Block::default().borders(Borders::ALL).title(first_msg))
-            .wrap(Wrap { trim: true })
+            .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
 
         frame.render_widget(chat_window, chunks[0]);
 
         let input = Paragraph::new(self.user_message.as_str())
-            .wrap(Wrap { trim: true })
+            .wrap(Wrap { trim: false })
             .block(
                 Block::default()
                     .borders(Borders::ALL)
