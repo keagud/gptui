@@ -106,45 +106,39 @@ pub struct Message {
 
 const BLOCK_MARKER: &str = "```__<BLOCK>__```";
 impl Message {
+    pub fn new(role: Role, content: &str, timestamp: DateTime<Utc>) -> Self {
+        let mut new_msg = Self {
+            role,
+            content: content.into(),
+            timestamp,
+            ..Default::default()
+        };
+
+        new_msg.update_blocks();
+
+        new_msg
+    }
+
     pub fn new_user(text: &str) -> Self {
         let role = Role::User;
         let timestamp = Utc::now();
-        let content = text.to_string();
-
-        Self {
-            role,
-            timestamp,
-            content,
-            ..Default::default()
-        }
+        Self::new(role, text, timestamp)
     }
 
     pub fn new_asst(text: &str) -> Self {
         let role = Role::Assistant;
         let timestamp = Utc::now();
-        let content = text.to_string();
-
-        Self {
-            role,
-            timestamp,
-            content,
-            ..Default::default()
-        }
+        Self::new(role, text, timestamp)
     }
 
-    pub fn new(role: Role, content: String, timestamp_epoch: f64) -> Self {
+    pub fn new_from_db(role: Role, content: String, timestamp_epoch: f64) -> Self {
         let timestamp_secs = f64::floor(timestamp_epoch) as i64;
         let timestamp_nanos = f64::fract(timestamp_epoch) * 1_000_000f64;
 
         let timestamp = DateTime::from_timestamp(timestamp_secs, timestamp_nanos.floor() as u32)
             .expect("Epoch time was valid");
 
-        Self {
-            role,
-            content,
-            timestamp,
-            ..Default::default()
-        }
+        Self::new(role, &content, timestamp)
     }
 
     pub fn timestamp_epoch(&self) -> f64 {

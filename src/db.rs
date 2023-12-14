@@ -144,7 +144,7 @@ impl DbStore for Thread {
 
         let messages: Vec<Message> = stmt
             .query_and_then([&id_str], |row| -> anyhow::Result<Message> {
-                Ok(Message::new(
+                Ok(Message::new_from_db(
                     Role::from_num(row.get::<usize, i64>(0)?.try_into()?)?,
                     row.get(1)?,
                     row.get(2)?,

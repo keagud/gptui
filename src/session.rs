@@ -21,6 +21,11 @@ pub use crate::message::{CodeBlock, Message, Role};
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const MAX_TOKENS: usize = 200;
 
+lazy_static::lazy_static! {
+    static ref CLIENT: reqwest::Client = create_client()
+        .expect("HTTP client initialization failed");
+}
+
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct Thread {
     messages: Vec<Message>,
