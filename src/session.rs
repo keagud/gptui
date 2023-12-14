@@ -148,7 +148,6 @@ impl Message {
         }
     }
 
-
     pub fn new(role: Role, content: String, timestamp_epoch: f64) -> Self {
         let timestamp_secs = f64::floor(timestamp_epoch) as i64;
         let timestamp_nanos = f64::fract(timestamp_epoch) * 1_000_000f64;
@@ -204,8 +203,9 @@ impl Message {
         Ok(Text::from(formatted_lines))
     }
 
+    // TODO make sure this is called on every new message initializiation
     ///update code_blocks and prose_content to align with the message text
-    pub fn update_blocks(&mut self) -> anyhow::Result<(())> {
+    pub fn update_blocks(&mut self) {
         let mut blocks = Vec::new();
         self.code_blocks.clear();
 
@@ -235,8 +235,6 @@ impl Message {
         self.code_blocks.extend(blocks.into_iter());
 
         self.prose_content = with_blocks_extracted;
-
-        Ok(())
     }
 }
 
