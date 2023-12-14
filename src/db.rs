@@ -8,6 +8,7 @@ use std::io;
 use std::path::PathBuf;
 use uuid::Uuid;
 
+
 const SCHEMA_CMD: &str = r#"
     CREATE TABLE thread(
         id VARCHAR PRIMARY KEY,

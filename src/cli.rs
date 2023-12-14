@@ -80,7 +80,7 @@ pub fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
 
 pub fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let mut session = Session::new_dummy()?;
+    let mut session = Session::new()?;
     session.load_threads()?;
 
     match &cli.command {

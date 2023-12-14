@@ -24,6 +24,7 @@ const MAX_TOKENS: usize = 200;
 lazy_static::lazy_static! {
     static ref CLIENT: reqwest::Client = create_client()
         .expect("HTTP client initialization failed");
+
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -72,7 +73,7 @@ impl Thread {
 
             let text = msg.formatted_content(&mut block_counter)?;
 
-            all_blocks.extend(msg.code_blocks.iter().cloned());
+            all_blocks.extend(msg.code_blocks().iter().cloned());
 
             let amended_lines = [header_line]
                 .into_iter()
@@ -178,14 +179,9 @@ impl CompletionChunk {
 }
 
 /// Struct holding state for multiple chat sessions
-pub struct Session<T>
-where
-    T: Write,
-{
-    writer: T,
-    client: Client,
+pub struct Session {
     pub threads: HashMap<Uuid, Thread>,
-    db: rusqlite::Connection,
+    db : rusqlite::Connection
 }
 
 fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>, Option<String>)> {
@@ -222,36 +218,11 @@ fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>
     Ok((return_chunks, remainder))
 }
 
-impl Session<Stdout> {
-    /// Create a new Session that will write its output to stdout
-    pub fn new_stdout() -> anyhow::Result<Session<Stdout>> {
-        Self::new(io::stdout())
-    }
-}
-
-impl Session<Sink> {
-    /// Create a new Session that will write to a dummy sink (no visible output)
-    pub fn new_dummy() -> anyhow::Result<Session<Sink>> {
-        Self::new(sink())
-    }
-}
-
-impl Default for Session<Sink> {
-    fn default() -> Self {
-        Self::new(sink()).expect("Session initialization failed")
-    }
-}
-
-impl<T> Session<T>
-where
-    T: Write,
-{
-    pub fn new(writer: T) -> anyhow::Result<Self> {
+impl Session {
+    pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            writer,
-            client: create_client()?,
             threads: HashMap::new(),
-            db: init_db()?,
+            db: init_db()?
         })
     }
 
@@ -265,18 +236,6 @@ where
 
         Ok(())
     }
-
-    fn writer(&mut self) -> &mut T {
-        &mut self.writer
-    }
-
-    fn write_all_flushed(&mut self, buf: impl AsRef<[u8]>) -> io::Result<()> {
-        self.writer.write_all(buf.as_ref())?;
-        self.writer.flush()?;
-
-        Ok(())
-    }
-
     fn add_thread_message(&mut self, id: Uuid, message: Message) -> anyhow::Result<()> {
         self.thread_by_id_mut(id)
             .ok_or(anyhow::format_err!("{id} is not a thread id"))?
@@ -288,12 +247,7 @@ where
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
     pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<Uuid> {
-        let messages = vec![Message {
-            role: Role::System,
-            content: prompt.into(),
-            timestamp: Utc::now(),
-            ..Default::default()
-        }];
+        let messages = vec![Message::new(Role::System, prompt, Utc::now())];
 
         let model = "gpt-4";
         let id = Uuid::new_v4();
@@ -326,125 +280,12 @@ where
             .collect_vec()
     }
 
+    /// Get the number of threads in this session with at least one message
     pub fn nonempty_count(&self) -> usize {
         self.threads
             .iter()
             .filter(|(_, t)| !t.messages.is_empty())
             .count()
-    }
-
-    pub async fn stream_user_message(
-        &mut self,
-        msg: &str,
-        thread_id: Uuid,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<Option<String>>>> {
-        let user_message = Message {
-            role: Role::User,
-            content: msg.trim().into(),
-            timestamp: Utc::now(),
-            ..Default::default()
-        };
-
-        let data = {
-            let thread = self
-                .thread_by_id_mut(thread_id)
-                .ok_or(anyhow::format_err!("No thread found with id: {thread_id}"))?;
-
-            thread.add_message(user_message);
-
-            thread.as_json_body()
-        };
-
-        let response = self.client.post(OPENAI_URL).json(&data).send().await?;
-
-        let stream = response
-            .error_for_status()?
-            .bytes_stream()
-            .map(|e| e.map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e)));
-
-        let mut buf = String::new();
-
-        let _message_tokens = String::new();
-
-        let _stream = async_stream::stream! {
-
-            for await chunk_bytes in stream {
-
-                let chunk = chunk_bytes
-                    .map_err(|e| anyhow::anyhow!(e))
-                    .and_then(|c| String::from_utf8(c.into())
-                    .map_err(|e| anyhow::anyhow!(e)))?;
-
-
-                    buf.push_str(&chunk);
-
-                    let (parsed, remainder) = try_parse_chunks(&buf)?;
-
-                    buf.clear();
-
-                    if let Some(remainder) = remainder {
-                        buf.push_str(&remainder);
-                    }
-
-
-                    if let Some(chunks) = parsed {
-
-                        for chunk in chunks.iter() {
-                                if let Some(_s) = chunk.token() {
-                        }
-                                yield Ok(chunk.token());
-
-                        }
-                    }
-
-            }
-
-
-
-
-        };
-        Ok(_stream)
-    }
-
-    pub async fn run_shell_stdin(&mut self, thread_id: Uuid) -> anyhow::Result<()> {
-        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-
-        self.run_shell(thread_id, &mut reader).await
-    }
-
-    pub async fn run_shell<R>(&mut self, thread_id: Uuid, reader: &mut R) -> anyhow::Result<()>
-    where
-        R: AsyncBufRead + std::marker::Unpin,
-    {
-        let mut buf = String::new();
-
-        loop {
-            reader.read_line(&mut buf).await?;
-            let buf_trimmed = buf.trim();
-
-            if buf_trimmed.is_empty() {
-                continue;
-            }
-
-            if buf_trimmed.to_lowercase() == "q" {
-                break;
-            }
-
-            let stream = self.stream_user_message(buf_trimmed, thread_id).await?;
-
-            pin_mut!(stream);
-
-            while let Some(Ok(token)) = stream.next().await {
-                let write_bytes = token.map(|t| t.as_bytes().to_owned()).unwrap_or_default();
-
-                self.write_all_flushed(&write_bytes)?;
-            }
-
-            self.write_all_flushed("\n")?;
-            buf.clear();
-        }
-
-        Ok(())
     }
 
     pub fn save_to_db(&mut self) -> anyhow::Result<()> {
@@ -456,10 +297,7 @@ where
     }
 }
 
-impl<T> Drop for Session<T>
-where
-    T: Write,
-{
+impl Drop for Session {
     fn drop(&mut self) {
         self.save_to_db().unwrap();
     }

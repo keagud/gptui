@@ -98,14 +98,22 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
 
     #[serde(skip)]
-    pub code_blocks: Vec<CodeBlock>,
+    code_blocks: Vec<CodeBlock>,
 
     #[serde(skip)]
-    pub non_code_content: String,
+    non_code_content: String,
 }
 
 const BLOCK_MARKER: &str = "```__<BLOCK>__```";
 impl Message {
+    pub fn code_blocks(&self) -> Vec<&CodeBlock> {
+        self.code_blocks.iter().collect()
+    }
+
+    pub fn non_code_content(&self) -> &str {
+        &self.non_code_content
+    }
+
     pub fn new(role: Role, content: &str, timestamp: DateTime<Utc>) -> Self {
         let mut new_msg = Self {
             role,

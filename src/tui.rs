@@ -24,7 +24,6 @@ use crossterm::{
 
 use ctrlc::set_handler;
 
-type SessionHandle = Session<std::io::Sink>;
 type ReplyRx = Receiver<Option<String>>;
 
 type Backend = ratatui::backend::CrosstermBackend<std::io::Stderr>;
@@ -54,7 +53,7 @@ macro_rules! concat_text {
 
 pub struct App {
     should_quit: bool,
-    session: SessionHandle,
+    session: Session,
     thread_id: Option<uuid::Uuid>,
     reply_rx: Option<ReplyRx>,
     incoming_message: String,
@@ -63,20 +62,36 @@ pub struct App {
     chat_scroll: usize,
 }
 
-impl Default for App {
-    fn default() -> Self {
+macro_rules! app_defaults {
+    ($session:expr, $thread_id:expr) => {{
         let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
         Self {
             should_quit: false,
-            session: Default::default(),
-            thread_id: Default::default(),
+            session: $session,
+            thread_id: Some($thread_id),
             reply_rx: Default::default(),
             incoming_message: String::new(),
             user_message: String::new(),
             chat_scroll: 0,
             tick_duration,
         }
-    }
+    }};
+
+    ($session:expr) => {
+        {
+        let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
+        Self {
+            should_quit: false,
+            session: $session,
+            thread_id: None,
+            reply_rx: Default::default(),
+            incoming_message: String::new(),
+            user_message: String::new(),
+            chat_scroll: 0,
+            tick_duration,
+        }
+        }
+    };
 }
 
 macro_rules! thread_missing {
@@ -289,23 +304,16 @@ impl App {
         Ok(())
     }
 
-    pub fn with_thread(session: SessionHandle, thread_id: Uuid) -> Self {
-        Self {
-            session,
-            thread_id: Some(thread_id),
-            ..Default::default()
-        }
-    }
+    pub fn with_thread(session: Session, thread_id: Uuid) -> Self {
+        app_defaults!(session, thread_id)
+            }
 
     pub fn new(prompt: &str) -> anyhow::Result<Self> {
-        let mut session = SessionHandle::new_dummy()?;
-        let thread_id = Some(session.new_thread(prompt)?);
+        let mut session = Session::new()?;
 
-        Ok(Self {
-            session,
-            thread_id,
-            ..Default::default()
-        })
+        Ok(app_defaults!(session))
+
+
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
