@@ -174,12 +174,13 @@ impl Message {
     /// `index` is the value to start numbering the block annotations from
     pub fn formatted_content<'a>(&'a self, index: &mut usize) -> anyhow::Result<Text<'a>> {
         let mut formatted_lines: Vec<Line> = Vec::new();
-        let block_index = 0usize;
+        let mut block_index = 0usize;
 
         for msg_line in self.non_code_content.lines() {
             if msg_line.trim() == BLOCK_MARKER {
                 if let Some(block) = self.code_blocks.get(block_index) {
                     formatted_lines.extend(block.highlighted_text(*index)?.lines.into_iter());
+                    block_index += 1;
                 }
             } else {
                 formatted_lines.push(msg_line.into());
@@ -234,8 +235,9 @@ impl CodeBlock {
     pub fn highlighted_text(&self, _index: usize) -> anyhow::Result<Text<'_>> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
-        let _formatted_lines: Vec<Line> = Vec::new();
+        let mut formatted_lines: Vec<Line> = Vec::new();
 
+        #[allow(unused)]
         let line_indents = self.content.lines().map(|ln| {
             ln.chars()
                 .take_while(|c| c.is_whitespace())
@@ -247,17 +249,18 @@ impl CodeBlock {
                 .sum::<usize>()
         });
 
-        for (line, _indent) in LinesWithEndings::from(&self.content).zip(line_indents) {
+        for line in LinesWithEndings::from(&self.content) {
             let line_spans = hl
                 .highlight_line(line, &SYNTAX_SET)?
                 .into_iter()
                 .filter_map(|segment| into_span(segment).ok())
                 .collect_vec();
 
-            let _line_hl = Line::from(line_spans);
+            let line_hl = Line::from(line_spans);
+            formatted_lines.push(line_hl);
         }
 
-        todo!();
+        Ok(Text::from(formatted_lines))
     }
 
     fn syntax(&self) -> &SyntaxReference {
