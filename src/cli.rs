@@ -3,7 +3,6 @@ use anyhow;
 use anyhow::format_err;
 
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 use crossterm::{
     self,
     terminal::{Clear, ClearType},
@@ -51,22 +50,6 @@ fn backspace() -> io::Result<()> {
     io::stdout().write_all("\x08".as_bytes())?;
 
     Ok(())
-}
-
-fn print_message(msg: &Message) -> Option<()> {
-    match msg.role {
-        Role::System => return None,
-        Role::User => {
-            println!("{}", "<User>".green().bold().underline());
-            println!("{}{}", INPUT_INDICATOR, msg.content);
-        }
-        Role::Assistant => {
-            println!("{}", "<Assistant>".blue().bold().underline());
-            println!("{}", msg.content)
-        }
-    }
-
-    Some(())
 }
 
 pub fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {

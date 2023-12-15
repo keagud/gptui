@@ -1,14 +1,17 @@
+use std::borrow::Cow;
+
 use crossbeam_channel::Receiver;
 use itertools::Itertools;
 
 use ratatui::{
-    prelude::{Constraint, CrosstermBackend, Direction, Layout},
-    style::{Style, Stylize},
+    prelude::{Alignment, Constraint, CrosstermBackend, Direction, Layout},
+    style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 
+use serde::de::value::CowStrDeserializer;
 use uuid::Uuid;
 
 use crossterm::{
@@ -24,6 +27,9 @@ use crossterm::{
 
 use ctrlc::set_handler;
 
+use crate::clip;
+use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
+
 type ReplyRx = Receiver<Option<String>>;
 
 type Backend = ratatui::backend::CrosstermBackend<std::io::Stderr>;
@@ -31,8 +37,6 @@ type CrosstermTerminal = ratatui::Terminal<Backend>;
 
 const FPS: f64 = 30.0;
 const SCROLL_STEP: usize = 1;
-
-use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
 
 fn extend_text<'a>(text1: Text<'a>, text2: Text<'a>) -> Text<'a> {
     let mut t = text1.clone();
@@ -60,35 +64,48 @@ pub struct App {
     user_message: String,
     tick_duration: std::time::Duration,
     chat_scroll: usize,
+    bottom_text: Option<String>,
+    copy_select_buf: String,
+    copy_mode: bool,
+    selected_block_index: Option<usize>,
+}
+
+macro_rules! resolve_thread_id {
+    (Some($thread_id:expr)) => {
+        Some($thread_id)
+    };
+
+    (None) => {
+        None
+    };
+
+    ($thread_id:expr) => {
+        Some($thread_id)
+    };
 }
 
 macro_rules! app_defaults {
-    ($session:expr, $thread_id:expr) => {{
+    ($session:expr, $thread_id:ident) => {{
         let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
+
         Self {
             should_quit: false,
             session: $session,
-            thread_id: Some($thread_id),
+            thread_id: resolve_thread_id!($thread_id),
             reply_rx: Default::default(),
             incoming_message: String::new(),
             user_message: String::new(),
             chat_scroll: 0,
             tick_duration,
+            bottom_text: None,
+            copy_select_buf: String::new(),
+            copy_mode: false,
+            selected_block_index: None,
         }
     }};
 
     ($session:expr) => {{
-        let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
-        Self {
-            should_quit: false,
-            session: $session,
-            thread_id: None,
-            reply_rx: Default::default(),
-            incoming_message: String::new(),
-            user_message: String::new(),
-            chat_scroll: 0,
-            tick_duration,
-        }
+        app_defaults!($session, None)
     }};
 }
 
@@ -96,6 +113,22 @@ macro_rules! thread_missing {
     ($opt:expr) => {
         $opt.ok_or_else(|| anyhow::format_err!("Not connected to a thread"))
     };
+}
+
+// get an initial slice of a string, ending with elipsis,
+//desired_length is the final length including elipsis
+fn string_preview<'a>(text: &'a str, desired_length: usize) -> Cow<'a, str> {
+    if text.len() <= desired_length {
+        return text.into();
+    }
+
+    Cow::from(
+        text.chars()
+            .take(desired_length.saturating_sub(3))
+            .chain("...".chars())
+            .take(desired_length)
+            .join(""),
+    )
 }
 
 impl App {
@@ -128,35 +161,114 @@ impl App {
         Ok(())
     }
 
+    /// 'minor mode' allowing the user to select code block text by its displayed index
+    fn update_copy_mode(&mut self, key_event: KeyEvent) -> anyhow::Result<()> {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.copy_select_buf.clear();
+                self.copy_mode = false;
+            }
+            KeyCode::Enter => {
+                if let Some(index) = self.selected_block_index {
+                    match self.thread()?.code_blocks().get(index.saturating_sub(1)) {
+                        None => {
+                            self.bottom_text = Some(format!("No selection for '{}'!", index));
+
+                            self.copy_select_buf.clear();
+                            self.copy_mode = false;
+                        }
+                        Some(block) => {
+                            clip::copy(&block.content)?;
+                            self.bottom_text =
+                                Some(format!("Copied '{}'", string_preview(&block.content, 30)));
+                            // TODO extract this cleanup logic to a function
+                            self.copy_select_buf.clear();
+                            self.copy_mode = false;
+                        }
+                    }
+                }
+            }
+
+            KeyCode::Char(c) if c.is_digit(10) => {
+                self.copy_select_buf.push(c);
+
+                match self.copy_select_buf.parse::<usize>() {
+                    Ok(n)
+                        if self
+                            .thread()?
+                            .code_blocks()
+                            .get(n.saturating_sub(1))
+                            .is_some() => {
+
+                            self.selected_block_index = Some(n);
+
+                        }
+
+                    Ok(m) => {
+                        self.bottom_text = Some(format!("No selection for '{}'!", m));
+                        self.copy_mode = false;
+                        self.copy_select_buf.clear();
+                    }
+
+                    _ => {
+                        self.copy_mode = false;
+                        self.copy_select_buf.clear();
+                    }
+                }
+            }
+
+            _ => (),
+        }
+
+        Ok(())
+    }
+
     fn update_awaiting_send(&mut self) -> anyhow::Result<()> {
-        if let Event::Key(KeyEvent {
-            kind: event::KeyEventKind::Press,
-            code: key_code,
-            modifiers: key_modifiers,
-            ..
-        }) = crossterm::event::read()?
+        if let Event::Key(
+            key_event @ KeyEvent {
+                kind: event::KeyEventKind::Press,
+                code: key_code,
+                modifiers: key_modifiers,
+                ..
+            },
+        ) = crossterm::event::read()?
         {
             match key_code {
+                // if already in copy mode, forward event to its handler
+                _ if self.copy_mode => self.update_copy_mode(key_event)?,
+
+                // ctrl-space to enter copy mode
+                KeyCode::Char(' ') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
+                    self.copy_mode = true;
+                }
+
+                // ctrl-c to quit
                 KeyCode::Char('c') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.should_quit = true;
                 }
 
+                // enter uppercase char
                 KeyCode::Char(c) if matches!(key_modifiers, KeyModifiers::SHIFT) => {
                     self.user_message.push(c.to_ascii_uppercase());
                 }
 
+                // enter lowercase char
                 KeyCode::Char(c) => {
                     self.user_message.push(c);
                 }
 
+                // delete last char
                 KeyCode::Backspace => {
                     self.user_message.pop();
                 }
 
+                // insert a newline
+                // TODO handle the conversion to the Line type correctly
                 KeyCode::Enter if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.user_message.push('\n');
                 }
 
+                //submit the message
                 KeyCode::Enter => {
                     if !self.user_message.is_empty() {
                         let new_message = Message::new_user(&self.user_message);
@@ -168,10 +280,12 @@ impl App {
                     }
                 }
 
+                //scroll history up
                 KeyCode::Up => {
                     self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
                 }
 
+                // scroll history down
                 KeyCode::Down => {
                     self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
                 }
@@ -249,7 +363,7 @@ impl App {
 
         let mut msgs_formatted = self
             .thread()?
-            .tui_formatted_messages(chunks[0].width - (v_padding * 2) - 2 )?;
+            .tui_formatted_messages(chunks[0].width - (v_padding * 2) - 2)?;
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
@@ -285,11 +399,19 @@ impl App {
             self.chat_scroll
         } as u16;
 
+        let (border_color, border_type) = if self.copy_mode {
+            (Color::Blue, BorderType::Thick)
+        } else {
+            (Color::default(), BorderType::Rounded)
+        };
+
         let chat_window = Paragraph::new(msgs_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(first_msg)
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(border_color))
+                    .title(string_preview(first_msg, 20).to_string())
                     .padding(ratatui::widgets::Padding {
                         left: v_padding,
                         right: v_padding,
@@ -301,16 +423,24 @@ impl App {
 
         frame.render_widget(chat_window, chunks[0]);
 
-        let input = Paragraph::new(self.user_message.as_str())
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(box_color)
-                    .border_type(ratatui::widgets::BorderType::Thick),
-            );
+        let mut input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(box_color)
+            .border_type(ratatui::widgets::BorderType::Rounded);
 
-        frame.render_widget(input, chunks[1]);
+        if let Some(ref bottom_text) = self.bottom_text {
+            input_block = input_block
+                .title(bottom_text.clone())
+                .title_alignment(Alignment::Left)
+                .title_style(Style::default().cyan())
+                .title_position(ratatui::widgets::block::Position::Bottom);
+        }
+
+        let input_widget = Paragraph::new(self.user_message.as_str())
+            .wrap(Wrap { trim: false })
+            .block(input_block);
+
+        frame.render_widget(input_widget, chunks[1]);
 
         Ok(())
     }
@@ -343,5 +473,18 @@ impl App {
 
         App::shutdown()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test_app {
+    use super::*;
+
+    #[test]
+    fn test_string_preview() {
+        assert_eq!(
+            string_preview("llorum ipsum dolor sit amet", 9),
+            "llorum..."
+        )
     }
 }

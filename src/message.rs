@@ -21,7 +21,7 @@ use futures_util::TryStreamExt;
 
 lazy_static::lazy_static! {
 
-   static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r"```(?<header>\w+)?(?<content>.*?)```")
+   static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r"```(?<header>\w+)?\n(?<content>.*?)\n```")
         .dot_matches_new_line(true)
         .build()
         .expect("Premade regex should be ok");

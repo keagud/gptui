@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use colored::Colorize;
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
 use futures::{Stream, StreamExt};
@@ -35,9 +34,6 @@ pub struct Thread {
 
     #[serde(skip)]
     pub id: Uuid,
-
-    #[serde(skip)]
-    code_block_counts: usize,
 }
 
 impl Thread {
@@ -62,6 +58,14 @@ impl Thread {
             .expect("At least one message")
             .content
             .as_str()
+    }
+
+    pub fn code_blocks(&self) -> Vec<&CodeBlock> {
+        self.messages
+            .iter()
+            .map(|m| m.code_blocks())
+            .flatten()
+            .collect()
     }
 
     /// Get all messages in this thread as they will be displayed
