@@ -3,7 +3,7 @@ use anyhow::format_err;
 use chrono::{DateTime, Utc};
 
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span, StyledGrapheme, Text};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
@@ -243,6 +243,19 @@ impl Message {
     }
 }
 
+/// collect a group of styled graphemes into equivalent spans
+fn coalesce_graphemes<'a, T>(mut graphemes: T) -> Vec<Span<'a>>
+where
+    T: IntoIterator<Item = StyledGrapheme<'a>>,
+{
+    graphemes
+        .into_iter()
+        .group_by(|g| g.style)
+        .into_iter()
+        .map(|(style, group)| Span::styled(group.map(|g| g.symbol).join(""), style))
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct CodeBlock {
     pub language: Option<String>,
@@ -278,11 +291,14 @@ impl CodeBlock {
                 None => continue,
             };
 
-            while escaped_line.width() < line_width.into() {
-                escaped_line.spans.push(pad.clone());
-            }
+            let mut formatted_lines_segment: Vec<Line<'_>> = Vec::new();
+            let mut formatted_line = Line::default();
 
-            formatted_lines.push(escaped_line);
+            // while escaped_line.width() < line_width.into() {
+            //     escaped_line.spans.push(pad.clone());
+            // }
+
+            // formatted_lines.push(escaped_line);
         }
 
         let annotation: Line = Span::styled(
