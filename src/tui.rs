@@ -233,6 +233,8 @@ impl App {
     }
 
     fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
+        let v_padding = 5u16;
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
@@ -245,7 +247,9 @@ impl App {
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let mut msgs_formatted = self.thread()?.tui_formatted_messages()?;
+        let mut msgs_formatted = self
+            .thread()?
+            .tui_formatted_messages(chunks[0].width - (v_padding * 2) - 2 )?;
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
@@ -266,7 +270,8 @@ impl App {
 
         let msg_lines = msgs_formatted
             .into_iter()
-            .flat_map(|m| m.lines)
+            .map(|m| m.lines)
+            .flatten()
             .collect_vec();
 
         let msgs_text = Text::from(msg_lines);
@@ -281,7 +286,16 @@ impl App {
         } as u16;
 
         let chat_window = Paragraph::new(msgs_text)
-            .block(Block::default().borders(Borders::ALL).title(first_msg))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(first_msg)
+                    .padding(ratatui::widgets::Padding {
+                        left: v_padding,
+                        right: v_padding,
+                        ..Default::default()
+                    }),
+            )
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0));
 

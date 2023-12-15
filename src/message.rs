@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
         .build()
         .expect("Premade regex should be ok");
 
-    static ref SYNTAX_SET: syntect::parsing::SyntaxSet =  syntect::parsing::SyntaxSet::load_defaults_newlines();
+    static ref SYNTAX_SET: syntect::parsing::SyntaxSet =  syntect::parsing::SyntaxSet::load_defaults_nonewlines();
 
 
     static ref THEME_SET: syntect::highlighting::ThemeSet = syntect::highlighting::ThemeSet::load_defaults();
@@ -55,7 +55,7 @@ pub enum Role {
 
 impl Role {
     pub fn tui_display_header(&self) -> Span {
-         match self {
+        match self {
             Role::User => Span::styled(
                 "User",
                 Style::default()
@@ -76,7 +76,6 @@ impl Role {
                     .add_modifier(Modifier::UNDERLINED),
             ),
         }
-
     }
 
     pub fn to_num(&self) -> usize {
@@ -180,14 +179,23 @@ impl Message {
 
     /// Get the text for this message as it will be displayed, with highlights and annotations
     /// `index` is the value to start numbering the block annotations from
-    pub fn formatted_content<'a>(&'a self, index: &mut usize) -> anyhow::Result<Text<'a>> {
+    pub fn formatted_content<'a>(
+        &'a self,
+        index: &mut usize,
+        line_width: u16,
+    ) -> anyhow::Result<Text<'a>> {
         let mut formatted_lines: Vec<Line> = Vec::new();
         let mut block_index = 0usize;
 
         for msg_line in self.non_code_content.lines() {
             if msg_line.trim() == BLOCK_MARKER {
                 if let Some(block) = self.code_blocks.get(block_index) {
-                    formatted_lines.extend(block.highlighted_text(*index)?.lines.into_iter());
+                    formatted_lines.extend(
+                        block
+                            .highlighted_text(*index, line_width)?
+                            .lines
+                            .into_iter(),
+                    );
                     block_index += 1;
                 }
             } else {
@@ -195,7 +203,9 @@ impl Message {
             }
         }
 
-        Ok(Text::from(formatted_lines))
+        let t = Text::from(formatted_lines);
+
+        Ok(t)
     }
 
     ///update code_blocks and non_code_content to align with the message text
@@ -239,19 +249,50 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    pub fn highlighted_text(&self, _index: usize) -> anyhow::Result<Text<'_>> {
+    pub fn highlighted_text(&self, index: usize, line_width: u16) -> anyhow::Result<Text<'_>> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
+
+        let bg_color = THEME_SET.themes[DEFAULT_THEME].settings.background.map(
+            |syntect::highlighting::Color { r, g, b, .. }| ratatui::style::Color::Rgb(r, g, b),
+        );
+
+        let pad = Span::styled(
+            " ",
+            Style {
+                bg: bg_color,
+                ..Default::default()
+            },
+        );
 
         let mut formatted_lines: Vec<Line> = Vec::new();
 
-        for line in LinesWithEndings::from(&self.content) {
+        for line in self.content.lines() {
             let ranges: Vec<(syntect::highlighting::Style, &str)> =
                 hl.highlight_line(line, &SYNTAX_SET).unwrap();
+
             let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
 
-            formatted_lines.extend(escaped.into_text()?.lines.into_iter());
-            continue;
+            let mut escaped_line: Line<'_> = match escaped.into_text()?.lines.into_iter().next() {
+                Some(ln) => ln,
+                None => continue,
+            };
+
+            while escaped_line.width() < line_width.into() {
+                escaped_line.spans.push(pad.clone());
+            }
+
+            formatted_lines.push(escaped_line);
         }
+
+        let annotation: Line = Span::styled(
+            format!("({index})"),
+            Style::default()
+                .add_modifier(Modifier::ITALIC)
+                .fg(Color::LightMagenta),
+        )
+        .into();
+
+        formatted_lines.push(annotation);
 
         Ok(Text::from(formatted_lines))
     }

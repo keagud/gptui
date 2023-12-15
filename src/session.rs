@@ -6,6 +6,7 @@ use futures::{Stream, StreamExt};
 use futures_util::{pin_mut, TryStreamExt};
 use itertools::Itertools;
 use ratatui::text::{Line, Text};
+use ratatui::Frame;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -63,15 +64,16 @@ impl Thread {
             .as_str()
     }
 
-    pub fn tui_formatted_messages(&self) -> anyhow::Result<Vec<Text>> {
+    /// Get all messages in this thread as they will be displayed
+    pub fn tui_formatted_messages(&self, line_width: u16) -> anyhow::Result<Vec<Text>> {
         let mut msgs_buf: Vec<Text> = Vec::new();
         let mut block_counter = 0usize;
         let mut all_blocks = Vec::new();
 
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
-            let header_line = Line::from(vec![msg.role.tui_display_header(), "\n".into()]);
+            let header_line = Line::from(vec![msg.role.tui_display_header()]);
 
-            let text = msg.formatted_content(&mut block_counter)?;
+            let text = msg.formatted_content(&mut block_counter, line_width)?;
 
             all_blocks.extend(msg.code_blocks().iter().cloned());
 
@@ -181,7 +183,7 @@ impl CompletionChunk {
 /// Struct holding state for multiple chat sessions
 pub struct Session {
     pub threads: HashMap<Uuid, Thread>,
-    db : rusqlite::Connection
+    db: rusqlite::Connection,
 }
 
 fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>, Option<String>)> {
@@ -222,7 +224,7 @@ impl Session {
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
             threads: HashMap::new(),
-            db: init_db()?
+            db: init_db()?,
         })
     }
 
