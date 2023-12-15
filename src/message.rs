@@ -197,6 +197,7 @@ impl Message {
                             .into_iter(),
                     );
                     block_index += 1;
+                    *index += 1;
                 }
             } else {
                 formatted_lines.push(msg_line.into());
@@ -291,6 +292,7 @@ impl CodeBlock {
                 .fg(Color::LightMagenta),
         )
         .into();
+
 
         formatted_lines.push(annotation);
 
