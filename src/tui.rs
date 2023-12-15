@@ -116,7 +116,7 @@ macro_rules! thread_missing {
 }
 
 // get an initial slice of a string, ending with elipsis,
-//desired_length is the final length including elipsis
+//desired_length is the maximum final length including elipsis.
 fn string_preview<'a>(text: &'a str, desired_length: usize) -> Cow<'a, str> {
     if text.len() <= desired_length {
         return text.into();
@@ -198,11 +198,11 @@ impl App {
                             .thread()?
                             .code_blocks()
                             .get(n.saturating_sub(1))
-                            .is_some() => {
-
-                            self.selected_block_index = Some(n);
-
-                        }
+                            .is_some() =>
+                    {
+                        self.selected_block_index = Some(n);
+                        self.bottom_text = None;
+                    }
 
                     Ok(m) => {
                         self.bottom_text = Some(format!("No selection for '{}'!", m));
@@ -347,7 +347,7 @@ impl App {
     }
 
     fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
-        let v_padding = 5u16;
+        let h_padding = 5u16;
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -355,15 +355,15 @@ impl App {
             .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
             .split(frame.size());
 
+        let content_line_width = chunks[0].width - (h_padding * 2) - 2;
+
         let first_msg = self
             .thread()?
             .first_message()
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let mut msgs_formatted = self
-            .thread()?
-            .tui_formatted_messages(chunks[0].width - (v_padding * 2) - 2)?;
+        let mut msgs_formatted = self.thread()?.tui_formatted_messages(content_line_width)?;
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
@@ -400,7 +400,7 @@ impl App {
         } as u16;
 
         let (border_color, border_type) = if self.copy_mode {
-            (Color::Blue, BorderType::Thick)
+            (Color::Magenta, BorderType::Thick)
         } else {
             (Color::default(), BorderType::Rounded)
         };
@@ -411,10 +411,10 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(border_type)
                     .border_style(Style::default().fg(border_color))
-                    .title(string_preview(first_msg, 20).to_string())
+                    .title(string_preview(first_msg, content_line_width.into()).to_string())
                     .padding(ratatui::widgets::Padding {
-                        left: v_padding,
-                        right: v_padding,
+                        left: h_padding,
+                        right: h_padding,
                         ..Default::default()
                     }),
             )
@@ -428,9 +428,15 @@ impl App {
             .border_style(box_color)
             .border_type(ratatui::widgets::BorderType::Rounded);
 
-        if let Some(ref bottom_text) = self.bottom_text {
+        let alert_msg = self
+            .bottom_text
+            .as_deref()
+            .map(|t| t.to_string())
+            .or_else(|| self.selected_block_index.map(|i| i.to_string().into()));
+
+        if let Some(alert_msg) = alert_msg {
             input_block = input_block
-                .title(bottom_text.clone())
+                .title(string_preview(&alert_msg, content_line_width.into()).to_string())
                 .title_alignment(Alignment::Left)
                 .title_style(Style::default().cyan())
                 .title_position(ratatui::widgets::block::Position::Bottom);

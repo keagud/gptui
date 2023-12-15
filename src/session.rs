@@ -71,7 +71,7 @@ impl Thread {
     /// Get all messages in this thread as they will be displayed
     pub fn tui_formatted_messages(&self, line_width: u16) -> anyhow::Result<Vec<Text>> {
         let mut msgs_buf: Vec<Text> = Vec::new();
-        let mut block_counter = 0usize;
+        let mut block_counter = 1usize;
         let mut all_blocks = Vec::new();
 
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
