@@ -24,7 +24,7 @@ lazy_static::lazy_static! {
    static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r"```(?<header>\w+)?\n(?<content>.*?)\n```")
         .dot_matches_new_line(true)
         .build()
-        .expect("Premade regex should be ok");
+        .expect("Regex failed to compile");
 
     static ref SYNTAX_SET: syntect::parsing::SyntaxSet =  syntect::parsing::SyntaxSet::load_defaults_nonewlines();
 
@@ -34,7 +34,7 @@ lazy_static::lazy_static! {
 
 }
 
-const DEFAULT_THEME: &str = "base16-ocean.dark";
+const DEFAULT_THEME: &str = "base16-eighties.dark";
 
 #[allow(unused)]
 fn timestamp() -> f64 {
@@ -292,7 +292,6 @@ impl CodeBlock {
                 .fg(Color::LightMagenta),
         )
         .into();
-
 
         formatted_lines.push(annotation);
 

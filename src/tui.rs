@@ -234,17 +234,27 @@ impl App {
         ) = crossterm::event::read()?
         {
             match key_code {
+                // ctrl-c to quit
+                KeyCode::Char('c') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
+                    self.should_quit = true;
+                }
+
+                //scroll history up
+                KeyCode::Up => {
+                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
+                }
+
+                // scroll history down
+                KeyCode::Down => {
+                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
+                }
+
                 // if already in copy mode, forward event to its handler
                 _ if self.copy_mode => self.update_copy_mode(key_event)?,
 
                 // ctrl-space to enter copy mode
                 KeyCode::Char(' ') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.copy_mode = true;
-                }
-
-                // ctrl-c to quit
-                KeyCode::Char('c') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
-                    self.should_quit = true;
                 }
 
                 // enter uppercase char
@@ -278,16 +288,6 @@ impl App {
 
                         self.user_message.clear();
                     }
-                }
-
-                //scroll history up
-                KeyCode::Up => {
-                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
-                }
-
-                // scroll history down
-                KeyCode::Down => {
-                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
                 }
 
                 _ => (),
