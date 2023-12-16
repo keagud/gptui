@@ -286,7 +286,7 @@ impl CodeBlock {
             .collect_vec();
     }
 
-    pub fn highlighted_text<'a>(&'a self, index: usize, line_width: u16) -> Text<'a> {
+    pub fn highlighted_text(&self, index: usize, line_width: u16) -> Text<'_> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
         let bg_color = THEME_SET.themes[DEFAULT_THEME].settings.background.map(

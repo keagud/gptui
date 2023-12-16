@@ -1,7 +1,6 @@
 use gpt::cli::run_cli;
-use gpt::message::{CodeBlock, Message, Role};
+use gpt::message::Message;
 use gpt::session::Session;
-use gpt::tui::App;
 
 fn main() -> anyhow::Result<()> {
     if std::env::var("TEST").is_ok_and(|v| v == "1") {

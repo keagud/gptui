@@ -1,6 +1,11 @@
-use std::borrow::Cow;
+use std::cell::RefCell;
+use std::process;
+use std::{borrow::Cow, process::Stdio};
 
+use crate::editor::input_from_editor;
+use anyhow::format_err;
 use crossbeam_channel::Receiver;
+use edit::get_editor;
 use itertools::Itertools;
 
 use ratatui::{
@@ -56,6 +61,7 @@ macro_rules! concat_text {
 }
 
 pub struct App {
+    terminal: RefCell<CrosstermTerminal>,
     should_quit: bool,
     session: Session,
     thread_id: Option<uuid::Uuid>,
@@ -85,22 +91,34 @@ macro_rules! resolve_thread_id {
 }
 
 macro_rules! app_defaults {
+    () => {{
+        match Session::new() {
+            Ok(s) => app_defaults!(s),
+            Err(e) => Err(e),
+        }
+    }};
+
     ($session:expr, $thread_id:ident) => {{
         let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
 
-        Self {
-            should_quit: false,
-            session: $session,
-            thread_id: resolve_thread_id!($thread_id),
-            reply_rx: Default::default(),
-            incoming_message: String::new(),
-            user_message: String::new(),
-            chat_scroll: 0,
-            tick_duration,
-            bottom_text: None,
-            copy_select_buf: String::new(),
-            copy_mode: false,
-            selected_block_index: None,
+        match CrosstermTerminal::new(CrosstermBackend::new(std::io::stderr())) {
+            Ok(term) => Ok(Self {
+                should_quit: false,
+                session: $session,
+                thread_id: resolve_thread_id!($thread_id),
+                reply_rx: Default::default(),
+                incoming_message: String::new(),
+                user_message: String::new(),
+                chat_scroll: 0,
+                tick_duration,
+                bottom_text: None,
+                copy_select_buf: String::new(),
+                copy_mode: false,
+                selected_block_index: None,
+                terminal: RefCell::new(term),
+            }),
+
+            Err(e) => Err(anyhow::anyhow!(e)),
         }
     }};
 
@@ -117,7 +135,7 @@ macro_rules! thread_missing {
 
 // get an initial slice of a string, ending with elipsis,
 //desired_length is the maximum final length including elipsis.
-fn string_preview<'a>(text: &'a str, desired_length: usize) -> Cow<'a, str> {
+fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
     if text.len() <= desired_length {
         return text.into();
     }
@@ -189,7 +207,7 @@ impl App {
                 }
             }
 
-            KeyCode::Char(c) if c.is_digit(10) => {
+            KeyCode::Char(c) if c.is_ascii_digit() => {
                 self.copy_select_buf.push(c);
 
                 match self.copy_select_buf.parse::<usize>() {
@@ -255,6 +273,11 @@ impl App {
                 // ctrl-space to enter copy mode
                 KeyCode::Char(' ') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.copy_mode = true;
+                }
+
+                // Open an external editor
+                KeyCode::Char('e') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
+                    self.show_editor()?;
                 }
 
                 // enter uppercase char
@@ -371,7 +394,7 @@ impl App {
                 "\n".into(),
             ])];
 
-            incoming_lines.extend(self.incoming_message.lines().map(|ln| Line::from(ln)));
+            incoming_lines.extend(self.incoming_message.lines().map(Line::from));
 
             msgs_formatted.push(Text::from(incoming_lines));
         }
@@ -384,8 +407,7 @@ impl App {
 
         let msg_lines = msgs_formatted
             .into_iter()
-            .map(|m| m.lines)
-            .flatten()
+            .flat_map(|m| m.lines)
             .collect_vec();
 
         let msgs_text = Text::from(msg_lines);
@@ -432,7 +454,7 @@ impl App {
             .bottom_text
             .as_deref()
             .map(|t| t.to_string())
-            .or_else(|| self.selected_block_index.map(|i| i.to_string().into()));
+            .or_else(|| self.selected_block_index.map(|i| i.to_string()));
 
         if let Some(alert_msg) = alert_msg {
             input_block = input_block
@@ -451,35 +473,61 @@ impl App {
         Ok(())
     }
 
-    pub fn with_thread(session: Session, thread_id: Uuid) -> Self {
+    pub fn with_thread(session: Session, thread_id: Uuid) -> anyhow::Result<Self> {
         app_defaults!(session, thread_id)
     }
 
     pub fn new(prompt: &str) -> anyhow::Result<Self> {
         let mut session = Session::new()?;
 
-        Ok(app_defaults!(session))
+        app_defaults!(session)
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
-        set_handler(|| {
-            App::shutdown().expect("Cleanup procedure failed");
-        })?;
+        // set_handler(|| {
+        //     App::shutdown().expect("Cleanup procedure failed");
+        // })?;
 
-        let backend = CrosstermBackend::new(std::io::stderr());
-
-        let mut terminal = CrosstermTerminal::new(backend)?;
         App::startup()?;
 
         while !self.should_quit {
             self.update()?;
 
-            terminal.draw(|frame| self.ui(frame).unwrap())?;
+            self.terminal
+                .borrow_mut()
+                .draw(|frame| self.ui(frame).unwrap())?;
         }
 
         App::shutdown()?;
         Ok(())
     }
+
+    fn show_editor(&mut self) -> anyhow::Result<()> {
+        self.terminal.borrow_mut().clear()?;
+        self.terminal.borrow_mut().flush()?;
+
+        if let Some(editor_input) = input_from_editor()? {
+            self.user_message = editor_input;
+        }
+
+        App::startup()?;
+        self.terminal.borrow_mut().clear()?;
+        Ok(())
+    }
+}
+
+fn editor_binary() -> anyhow::Result<String> {
+    #[cfg(target_family = "windows")]
+    let editor = get_editor().map(|s| s.to_string_lossy().into())?;
+
+    #[cfg(target_family = "unix")]
+    let editor =
+        std::env::var("EDITOR").or_else(|_| get_editor().map(|s| s.to_string_lossy().into()))?;
+
+    #[cfg(not(any(target_family = "unix", target_family = "windows")))]
+    compile_error!("Unsupported compile target");
+
+    Ok(editor)
 }
 
 #[cfg(test)]

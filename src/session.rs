@@ -61,11 +61,7 @@ impl Thread {
     }
 
     pub fn code_blocks(&self) -> Vec<&CodeBlock> {
-        self.messages
-            .iter()
-            .map(|m| m.code_blocks())
-            .flatten()
-            .collect()
+        self.messages.iter().flat_map(|m| m.code_blocks()).collect()
     }
 
     /// Get all messages in this thread as they will be displayed
