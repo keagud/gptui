@@ -69,7 +69,7 @@ impl Thread {
     }
 
     /// Get all messages in this thread as they will be displayed
-    pub fn tui_formatted_messages(&self, line_width: u16) -> anyhow::Result<Vec<Text>> {
+    pub fn tui_formatted_messages(&self, line_width: u16) -> Vec<Text> {
         let mut msgs_buf: Vec<Text> = Vec::new();
         let mut block_counter = 1usize;
         let mut all_blocks = Vec::new();
@@ -77,7 +77,7 @@ impl Thread {
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
             let header_line = Line::from(vec![msg.role.tui_display_header()]);
 
-            let text = msg.formatted_content(&mut block_counter, line_width)?;
+            let text = msg.formatted_content(&mut block_counter, line_width);
 
             all_blocks.extend(msg.code_blocks().iter().cloned());
 
@@ -90,7 +90,7 @@ impl Thread {
             msgs_buf.push(Text::from(amended_lines));
         }
 
-        Ok(msgs_buf)
+        msgs_buf
     }
 
     pub fn str_id(&self) -> String {

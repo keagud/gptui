@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, StyledGrapheme, Text};
 use serde::{Deserialize, Serialize};
+use std::default;
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxReference;
@@ -179,23 +180,15 @@ impl Message {
 
     /// Get the text for this message as it will be displayed, with highlights and annotations
     /// `index` is the value to start numbering the block annotations from
-    pub fn formatted_content<'a>(
-        &'a self,
-        index: &mut usize,
-        line_width: u16,
-    ) -> anyhow::Result<Text<'a>> {
+    pub fn formatted_content<'a>(&'a self, index: &mut usize, line_width: u16) -> Text<'a> {
         let mut formatted_lines: Vec<Line> = Vec::new();
         let mut block_index = 0usize;
 
         for msg_line in self.non_code_content.lines() {
             if msg_line.trim() == BLOCK_MARKER {
                 if let Some(block) = self.code_blocks.get(block_index) {
-                    formatted_lines.extend(
-                        block
-                            .highlighted_text(*index, line_width)?
-                            .lines
-                            .into_iter(),
-                    );
+                    formatted_lines
+                        .extend(block.highlighted_text(*index, line_width).lines.into_iter());
                     block_index += 1;
                     *index += 1;
                 }
@@ -204,9 +197,7 @@ impl Message {
             }
         }
 
-        let t = Text::from(formatted_lines);
-
-        Ok(t)
+        Text::from(formatted_lines)
     }
 
     ///update code_blocks and non_code_content to align with the message text
@@ -216,19 +207,14 @@ impl Message {
 
         let with_blocks_extracted = CODEBLOCK_PATTERN
             .replace_all(&self.content, |cap: &regex::Captures<'_>| {
-                let block = CodeBlock {
-                    language: cap.get(1).map(|s| s.as_str().to_owned()),
-                    content: cap
-                        .get(2)
-                        .map(|s| s.as_str().to_owned())
-                        .unwrap_or_default(),
-                };
+                let language = cap.get(1).map(|s| s.as_str().to_owned());
 
-                let _lang = if let Some(ref s) = block.language {
-                    s
-                } else {
-                    ""
-                };
+                let content = cap
+                    .get(2)
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default();
+
+                let block = CodeBlock::new(language, content);
 
                 blocks.push(block);
 
@@ -256,21 +242,58 @@ where
         .collect()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CodeBlock {
     pub language: Option<String>,
     pub content: String,
+    lines_24_bit_terminal_escaped: Vec<String>,
+    lines_tui: Vec<Line<'static>>,
 }
 
 impl CodeBlock {
-    pub fn highlighted_text(&self, index: usize, line_width: u16) -> anyhow::Result<Text<'_>> {
+    fn new(language: Option<String>, content: String) -> Self {
+        let mut block = Self {
+            language,
+            content,
+            ..Default::default()
+        };
+
+        block.update_lines();
+        block
+    }
+
+    fn update_lines(&mut self) {
+        let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
+
+        let term_lines = self
+            .content
+            .lines()
+            .map(|line| {
+                let ranges: Vec<(syntect::highlighting::Style, &str)> =
+                    hl.highlight_line(line, &SYNTAX_SET).unwrap();
+
+                syntect::util::as_24_bit_terminal_escaped(&ranges[..], true)
+            })
+            .collect_vec();
+
+        self.lines_24_bit_terminal_escaped = term_lines;
+
+        self.lines_tui = self
+            .lines_24_bit_terminal_escaped
+            .iter()
+            .map(|s| s.into_text().expect("Text conversion failed"))
+            .flat_map(|t| t.lines.into_iter())
+            .collect_vec();
+    }
+
+    pub fn highlighted_text<'a>(&'a self, index: usize, line_width: u16) -> Text<'a> {
         let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
         let bg_color = THEME_SET.themes[DEFAULT_THEME].settings.background.map(
             |syntect::highlighting::Color { r, g, b, .. }| ratatui::style::Color::Rgb(r, g, b),
         );
 
-        let pad = Span::styled(
+        let pad = StyledGrapheme::new(
             " ",
             Style {
                 bg: bg_color,
@@ -280,25 +303,16 @@ impl CodeBlock {
 
         let mut formatted_lines: Vec<Line> = Vec::new();
 
-        for line in self.content.lines() {
-            let ranges: Vec<(syntect::highlighting::Style, &str)> =
-                hl.highlight_line(line, &SYNTAX_SET).unwrap();
+        for line in self.lines_tui.iter() {
+            let width_adjusted_lines = line
+                .styled_graphemes(Style::default())
+                .chunks(line_width.into())
+                .into_iter()
+                .map(|ln_chunk| ln_chunk.pad_using(line_width.into(), |_| pad.clone()))
+                .map(|chunk| Line::from(coalesce_graphemes(chunk)))
+                .collect_vec();
 
-            let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
-
-            let mut escaped_line: Line<'_> = match escaped.into_text()?.lines.into_iter().next() {
-                Some(ln) => ln,
-                None => continue,
-            };
-
-            let mut formatted_lines_segment: Vec<Line<'_>> = Vec::new();
-            let mut formatted_line = Line::default();
-
-            // while escaped_line.width() < line_width.into() {
-            //     escaped_line.spans.push(pad.clone());
-            // }
-
-            // formatted_lines.push(escaped_line);
+            formatted_lines.extend(width_adjusted_lines);
         }
 
         let annotation: Line = Span::styled(
@@ -311,7 +325,7 @@ impl CodeBlock {
 
         formatted_lines.push(annotation);
 
-        Ok(Text::from(formatted_lines))
+        Text::from(formatted_lines)
     }
 
     fn syntax(&self) -> &SyntaxReference {

@@ -363,7 +363,7 @@ impl App {
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let mut msgs_formatted = self.thread()?.tui_formatted_messages(content_line_width)?;
+        let mut msgs_formatted = self.thread()?.tui_formatted_messages(content_line_width);
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![

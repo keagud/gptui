@@ -29,7 +29,7 @@ Quo usque tandem?
 
         session.thread_by_id_mut(id).unwrap().add_message(msg);
 
-        session.thread_by_id(id).unwrap().tui_formatted_messages(70)?;
+        session.thread_by_id(id).unwrap().tui_formatted_messages(70);
     } else {
         run_cli()?;
     }
