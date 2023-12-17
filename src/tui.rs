@@ -179,29 +179,29 @@ impl App {
         Ok(())
     }
 
+    /// helper function to clear the copy buffer and unset the copy mode state
+    fn exit_copy_mode(&mut self) {
+        self.copy_select_buf.clear();
+        self.copy_mode = false;
+    }
+
     /// 'minor mode' allowing the user to select code block text by its displayed index
     fn update_copy_mode(&mut self, key_event: KeyEvent) -> anyhow::Result<()> {
         match key_event.code {
-            KeyCode::Esc => {
-                self.copy_select_buf.clear();
-                self.copy_mode = false;
-            }
+            KeyCode::Esc => self.exit_copy_mode(),
             KeyCode::Enter => {
                 if let Some(index) = self.selected_block_index {
                     match self.thread()?.code_blocks().get(index.saturating_sub(1)) {
                         None => {
                             self.bottom_text = Some(format!("No selection for '{}'!", index));
-
-                            self.copy_select_buf.clear();
-                            self.copy_mode = false;
+                            self.exit_copy_mode();
                         }
                         Some(block) => {
                             clip::copy(&block.content)?;
                             self.bottom_text =
                                 Some(format!("Copied '{}'", string_preview(&block.content, 30)));
                             // TODO extract this cleanup logic to a function
-                            self.copy_select_buf.clear();
-                            self.copy_mode = false;
+                            self.exit_copy_mode();
                         }
                     }
                 }
@@ -270,8 +270,8 @@ impl App {
                 // if already in copy mode, forward event to its handler
                 _ if self.copy_mode => self.update_copy_mode(key_event)?,
 
-                // ctrl-space to enter copy mode
-                KeyCode::Char(' ') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
+                // ctrl-w to enter copy mode
+                KeyCode::Char('w') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.copy_mode = true;
                 }
 
@@ -296,13 +296,12 @@ impl App {
                 }
 
                 // insert a newline
-                // TODO handle the conversion to the Line type correctly
-                KeyCode::Enter if matches!(key_modifiers, KeyModifiers::CONTROL) => {
+                KeyCode::Enter => {
                     self.user_message.push('\n');
                 }
 
-                //submit the message
-                KeyCode::Enter => {
+                //submit the message with ctrl-enter
+                KeyCode::Enter if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     if !self.user_message.is_empty() {
                         let new_message = Message::new_user(&self.user_message);
                         self.thread_mut()?.add_message(new_message);
