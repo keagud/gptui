@@ -34,6 +34,8 @@ pub fn input_from_editor() -> anyhow::Result<Option<String>> {
         .to_string_lossy()
         .to_string();
 
+    fs::File::create(&temp_filepath)?;
+
     Command::new(editor)
         .arg(&temp_filepath)
         .stdin(Stdio::inherit())

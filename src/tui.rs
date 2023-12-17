@@ -279,6 +279,22 @@ impl App {
                 KeyCode::Char('e') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
                     self.show_editor()?;
                 }
+                //submit the message with alt-enter
+                KeyCode::Enter if matches!(key_modifiers, KeyModifiers::ALT) => {
+                    if !self.user_message.is_empty() {
+                        let new_message = Message::new_user(&self.user_message);
+                        self.thread_mut()?.add_message(new_message);
+
+                        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
+
+                        self.user_message.clear();
+                    }
+                }
+
+                // insert a newline
+                KeyCode::Enter => {
+                    self.user_message.push('\n');
+                }
 
                 // enter uppercase char
                 KeyCode::Char(c) if matches!(key_modifiers, KeyModifiers::SHIFT) => {
@@ -293,23 +309,6 @@ impl App {
                 // delete last char
                 KeyCode::Backspace => {
                     self.user_message.pop();
-                }
-
-                // insert a newline
-                KeyCode::Enter => {
-                    self.user_message.push('\n');
-                }
-
-                //submit the message with ctrl-enter
-                KeyCode::Enter if matches!(key_modifiers, KeyModifiers::CONTROL) => {
-                    if !self.user_message.is_empty() {
-                        let new_message = Message::new_user(&self.user_message);
-                        self.thread_mut()?.add_message(new_message);
-
-                        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
-
-                        self.user_message.clear();
-                    }
                 }
 
                 _ => (),
