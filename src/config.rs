@@ -6,7 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-
 use toml;
 
 lazy_static::lazy_static! {
@@ -31,8 +30,11 @@ lazy_static::lazy_static! {
         PathBuf::from(PROJECT_DIRS.data_dir())
     };
 
+}
 
-
+mod default_config {
+    pub(super) const DEFAULT_CONFIG_TOML: &str =
+        include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
 }
 
 #[derive(Serialize, Deserialize)]
@@ -60,17 +62,14 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            syntax_theme: "base16-eighties.dark".into(),
-            prompts: vec![Prompt::default()],
-            ..Default::default()
-        }
+        toml::from_str(default_config::DEFAULT_CONFIG_TOML)
+            .expect("TOML for default config file could not be parsed")
     }
 }
 
 impl Config {
     pub fn path(&self) -> PathBuf {
-        CONFIG_DIR.join("config.toml")
+        dbg!(CONFIG_DIR.join("config.toml"))
     }
     fn save(&self) -> anyhow::Result<()> {
         let toml_str = toml::to_string_pretty(self)?;
@@ -83,12 +82,4 @@ impl Config {
     pub fn write_default() -> anyhow::Result<()> {
         Config::default().save()
     }
-}
-
-mod default_config {
-    use super::*;
-
-    const DEFAULT_CONFIG_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
-
-    lazy_static::lazy_static! {}
 }
