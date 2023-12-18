@@ -106,16 +106,16 @@ impl Thread {
     /// Add token(s) to the incoming message in progress
     pub fn update(&mut self, incoming_text: &str) {
         if self.incoming.is_some() {
-            self.incoming
-                .as_mut()
-                .map(|m| m.content.push_str(incoming_text));
+            self.incoming.as_mut().map(|m| m.update(incoming_text));
         } else {
             self.incoming = Some(Message::new_asst(incoming_text));
         };
     }
+
+    /// Commit the completed message to the thread, and reset state for the next incoming message
     pub fn commit_message(&mut self) {
         if let Some(msg) = self.incoming.take() {
-            self.add_message(msg);
+            self.messages.push(msg);
         }
     }
     pub fn clear_incoming_message(&mut self) {

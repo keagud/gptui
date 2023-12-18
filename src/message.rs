@@ -149,6 +149,12 @@ impl Message {
         Self::new(role, text, timestamp)
     }
 
+    pub fn update(&mut self, text: &str) {
+        self.content.push_str(text);
+        self.update_blocks();
+
+    }
+
     pub fn new_from_db(role: Role, content: String, timestamp_epoch: f64) -> Self {
         let timestamp_secs = f64::floor(timestamp_epoch) as i64;
         let timestamp_nanos = f64::fract(timestamp_epoch) * 1_000_000f64;
