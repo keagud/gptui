@@ -499,20 +499,6 @@ impl App {
     }
 }
 
-fn editor_binary() -> anyhow::Result<String> {
-    #[cfg(target_family = "windows")]
-    let editor = get_editor().map(|s| s.to_string_lossy().into())?;
-
-    #[cfg(target_family = "unix")]
-    let editor =
-        std::env::var("EDITOR").or_else(|_| get_editor().map(|s| s.to_string_lossy().into()))?;
-
-    #[cfg(not(any(target_family = "unix", target_family = "windows")))]
-    compile_error!("Unsupported compile target");
-
-    Ok(editor)
-}
-
 #[cfg(test)]
 mod test_app {
     use super::*;
