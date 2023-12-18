@@ -41,6 +41,7 @@ mod default_config {
 struct Prompt {
     label: String,
     prompt: String,
+    color: Option<String>,
 }
 
 impl Default for Prompt {
@@ -48,6 +49,7 @@ impl Default for Prompt {
         Self {
             label: "Assistant".into(),
             prompt: "You are a helpful assistant".into(),
+            color: None
         }
     }
 }
