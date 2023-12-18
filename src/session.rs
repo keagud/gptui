@@ -15,6 +15,7 @@ use std::io::{self, sink, Sink, Stdout, Write};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use uuid::Uuid;
 
+use crate::config::CONFIG;
 use crate::db::{init_db, DbStore};
 pub use crate::message::{CodeBlock, Message, Role};
 
@@ -38,8 +39,6 @@ pub struct Thread {
 
 impl Thread {
     pub fn new(messages: Vec<Message>, model: &str, id: Uuid) -> Self {
-        let _blocks_count = 1;
-
         Self {
             messages,
             model: model.into(),
@@ -131,12 +130,11 @@ impl Thread {
 
 /// Create a reqwest::Client with the correct default authorization headers
 fn create_client() -> anyhow::Result<Client> {
-    let token = env!("OPENAI_API_KEY");
 
     let headers: HeaderMap = [
         (
             header::AUTHORIZATION,
-            HeaderValue::from_str(format!("Bearer {token}").as_str())?,
+            HeaderValue::from_str(format!("Bearer {}", CONFIG.api_key()).as_str())?,
         ),
         (
             header::CONTENT_TYPE,

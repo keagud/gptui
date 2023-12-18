@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 # compile API key into the binary itself
-comptime-key = []
+comptime_key = []
 
 [dependencies]
 ansi-to-tui = "3.1.0"

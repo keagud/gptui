@@ -1,3 +1,4 @@
+use anyhow::format_err;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -13,7 +14,7 @@ lazy_static::lazy_static! {
     ProjectDirs::from("", "", env!("CARGO_PKG_NAME"))
         .expect("Could not initialize project directories");
 
-    pub static ref CONFIG_DIR: std::path::PathBuf = if cfg!(debug_assertions) {
+    static ref CONFIG_DIR: std::path::PathBuf = if cfg!(debug_assertions) {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_assets/config");
         std::fs::create_dir_all(&dir).expect("Failed to create debug config directory");
         dir
@@ -22,7 +23,7 @@ lazy_static::lazy_static! {
     };
 
 
-    pub static ref DATA_DIR: std::path::PathBuf = if cfg!(debug_assertions) {
+    static ref DATA_DIR: std::path::PathBuf = if cfg!(debug_assertions) {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_assets/data");
         std::fs::create_dir_all(&dir).expect("Failed to create debug data directory");
         dir
@@ -30,9 +31,12 @@ lazy_static::lazy_static! {
         PathBuf::from(PROJECT_DIRS.data_dir())
     };
 
+    pub static ref CONFIG: Config = Config::load().expect("Failed to load config file");
+
 }
 
 mod default_config {
+    // This is so the initial config file can contain explanatory comments
     pub(super) const DEFAULT_CONFIG_TOML: &str =
         include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
 }
@@ -41,7 +45,7 @@ mod default_config {
 struct Prompt {
     label: String,
     prompt: String,
-    color: Option<String>
+    color: Option<String>,
 }
 
 impl Default for Prompt {
@@ -49,7 +53,7 @@ impl Default for Prompt {
         Self {
             label: "Assistant".into(),
             prompt: "You are a helpful assistant".into(),
-            color: None
+            color: None,
         }
     }
 }
@@ -70,13 +74,52 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn path(&self) -> PathBuf {
-        dbg!(CONFIG_DIR.join("config.toml"))
+    pub fn data_dir(&self) -> &'static PathBuf {
+        &DATA_DIR
+    }
+
+    pub fn config_dir(&self) -> &'static PathBuf {
+        &CONFIG_DIR
+    }
+
+    #[cfg(comptime_key)]
+    pub fn api_key(&self) -> String {
+        std::env!("OPENAI_API_KEY").to_string();
+    }
+
+    #[cfg(not(comptime_key))]
+    pub fn api_key(&self) -> String {
+        let key_varname = self.api_key_var.as_deref().unwrap_or("OPENAI_API_KEY");
+
+        std::env::var_os(key_varname)
+            .map(|s| s.to_string_lossy().to_string())
+            .expect("No API key was found in the environment")
+            .into()
+    }
+
+    pub fn load() -> anyhow::Result<Self> {
+        let loaded_config = if !Self::path().try_exists()? {
+            // If no config present, save the default one
+            std::fs::write(Self::path(), default_config::DEFAULT_CONFIG_TOML)?;
+            Self::default()
+        } else {
+            let loaded_config_str = fs::read_to_string(Self::path())?;
+            toml::from_str(&loaded_config_str)?
+        };
+
+        // panics if api key is not present
+        let _ = loaded_config.api_key();
+
+        Ok(loaded_config)
+    }
+
+    pub fn path() -> PathBuf {
+        CONFIG_DIR.join("config.toml")
     }
     fn save(&self) -> anyhow::Result<()> {
         let toml_str = toml::to_string_pretty(self)?;
 
-        fs::write(self.path(), &toml_str)?;
+        fs::write(Self::path(), &toml_str)?;
 
         Ok(())
     }

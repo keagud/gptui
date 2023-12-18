@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::config::CONFIG;
 use crate::session::{Message, Role, Thread};
 
 use directories::BaseDirs;
@@ -24,37 +25,13 @@ const SCHEMA_CMD: &str = r#"
 
 "#;
 
-pub fn data_dir() -> io::Result<PathBuf> {
-    let dir = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_assets")
-    } else {
-        BaseDirs::new()
-            .ok_or(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Could not locate the home directory",
-            ))?
-            .data_dir()
-            .to_path_buf()
-            .join("gpt_rs")
-    };
-
-    match dir.try_exists() {
-        Ok(true) => Ok(dir),
-        Ok(false) => {
-            fs::create_dir_all(&dir)?;
-            Ok(dir)
-        }
-        Err(e) => Err(e),
-    }
-}
-
 /// Create tables
 fn setup_table_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA_CMD)
 }
 
 pub fn init_db() -> anyhow::Result<Connection> {
-    let db_path = data_dir()?.join("gpt.db");
+    let db_path = CONFIG.data_dir().join("gpt.db");
 
     let requires_init = !db_path.try_exists()?;
     let conn = Connection::open(&db_path)?;
