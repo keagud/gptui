@@ -82,12 +82,12 @@ impl Config {
         &CONFIG_DIR
     }
 
-    #[cfg(comptime_key)]
+    #[cfg(feature = "comptime-key")]
     pub fn api_key(&self) -> String {
-        std::env!("OPENAI_API_KEY").to_string();
+        std::env!("OPENAI_API_KEY").into()
     }
 
-    #[cfg(not(comptime_key))]
+    #[cfg(not(feature = "comptime-key"))]
     pub fn api_key(&self) -> String {
         let key_varname = self.api_key_var.as_deref().unwrap_or("OPENAI_API_KEY");
 
