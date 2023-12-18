@@ -1,4 +1,7 @@
-use crate::session::{Message, Role, Session};
+use crate::{
+    config::{Prompt, CONFIG},
+    session::{Message, Role, Session},
+};
 use anyhow;
 use anyhow::format_err;
 
@@ -26,10 +29,14 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     List,
-    New { prompt: Option<String> },
-    Resume { index: i64 },
+    New {
+        #[arg(short, long, help = "Prompt to use")]
+        prompt: Option<String>,
+    },
+    Resume {
+        index: i64,
+    },
 }
-
 
 fn clear_screen() -> anyhow::Result<()> {
     if cfg!(target_os = "windows") {
@@ -41,21 +48,6 @@ fn clear_screen() -> anyhow::Result<()> {
     }
 
     io::stdout().flush()?;
-
-    Ok(())
-}
-
-fn backspace() -> io::Result<()> {
-    io::stdout().write_all("\x08".as_bytes())?;
-
-    Ok(())
-}
-
-pub fn delete_bytes_back(bytes_back: u16) -> anyhow::Result<()> {
-    let mut stdout = io::stdout();
-    crossterm::execute!(stdout, crossterm::cursor::MoveLeft(bytes_back))?;
-    crossterm::execute!(stdout, Clear(ClearType::FromCursorDown))?;
-    stdout.flush()?;
 
     Ok(())
 }
@@ -93,12 +85,14 @@ pub fn run_cli() -> anyhow::Result<()> {
             app.run()?;
         }
         Commands::New { prompt } => {
-            let prompt_str = match prompt {
-                Some(prompt) => prompt.as_str(),
-                None => DEFAULT_PROMPT,
+            let prompt = match prompt {
+                Some(prompt_label) => CONFIG
+                    .get_prompt(prompt_label)
+                    .ok_or_else(|| format_err!("No prompt found with label '{prompt_label}'"))?.to_owned(),
+                None => Prompt::default(),
             };
 
-            let new_thread_id = session.new_thread(prompt_str)?;
+            let new_thread_id = session.new_thread(&prompt)?;
 
             let mut app = App::with_thread(session, new_thread_id)?;
             app.run()?;

@@ -5,6 +5,8 @@ use gpt::session::Session;
 #[cfg(debug_assertions)]
 
 fn main() -> anyhow::Result<()> {
+    use gpt::config::Prompt;
+
     #[cfg(debug_assertions)]
     {
         if let Some(arg) = std::env::args_os()
@@ -45,7 +47,7 @@ Quo usque tandem?
         dbg!(&msg);
 
         let mut session = Session::new()?;
-        let id = session.new_thread("You are a helpful assistant")?;
+        let id = session.new_thread(&Prompt::default())?;
 
         session.thread_by_id_mut(id).unwrap().add_message(msg);
 

@@ -15,7 +15,7 @@ use std::io::{self, sink, Sink, Stdout, Write};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use uuid::Uuid;
 
-use crate::config::CONFIG;
+use crate::config::{Prompt, CONFIG};
 use crate::db::{init_db, DbStore};
 pub use crate::message::{CodeBlock, Message, Role};
 
@@ -35,6 +35,9 @@ pub struct Thread {
 
     #[serde(skip)]
     pub id: Uuid,
+
+    #[serde(skip)]
+    prompt: Prompt,
 }
 
 impl Thread {
@@ -51,12 +54,8 @@ impl Thread {
         self.messages.iter().collect()
     }
     /// Get the prompt used to begin this thread
-    pub fn prompt(&self) -> &str {
-        self.messages
-            .first()
-            .expect("At least one message")
-            .content
-            .as_str()
+    pub fn prompt(&self) -> &Prompt {
+        &self.prompt
     }
 
     pub fn code_blocks(&self) -> Vec<&CodeBlock> {
@@ -130,7 +129,6 @@ impl Thread {
 
 /// Create a reqwest::Client with the correct default authorization headers
 fn create_client() -> anyhow::Result<Client> {
-
     let headers: HeaderMap = [
         (
             header::AUTHORIZATION,
@@ -246,8 +244,8 @@ impl Session {
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
-    pub fn new_thread(&mut self, prompt: &str) -> anyhow::Result<Uuid> {
-        let messages = vec![Message::new(Role::System, prompt, Utc::now())];
+    pub fn new_thread(&mut self, prompt: &Prompt) -> anyhow::Result<Uuid> {
+        let messages = vec![Message::new(Role::System, prompt.prompt(), Utc::now())];
 
         let model = "gpt-4";
         let id = Uuid::new_v4();

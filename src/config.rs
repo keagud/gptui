@@ -41,11 +41,25 @@ mod default_config {
         include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
 }
 
-#[derive(Serialize, Deserialize)]
-struct Prompt {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Prompt {
     label: String,
     prompt: String,
     color: Option<String>,
+}
+
+impl Prompt {
+    pub fn label(&self) -> &str {
+        self.label.as_str()
+    }
+
+    pub fn prompt(&self) -> &str {
+        self.prompt.as_str()
+    }
+
+    pub fn color(&self) -> Option<&str> {
+        self.color.as_deref()
+    }
 }
 
 impl Default for Prompt {
@@ -74,6 +88,16 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn prompts(&self) -> Vec<&Prompt> {
+        self.prompts.iter().collect()
+    }
+
+    pub fn get_prompt(&self, label: &str) -> Option<&Prompt> {
+
+        self.prompts.iter().find(|p| p.label == label)
+
+
+    }
     pub fn data_dir(&self) -> &'static PathBuf {
         &DATA_DIR
     }
