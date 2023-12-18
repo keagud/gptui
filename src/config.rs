@@ -35,6 +35,25 @@ lazy_static::lazy_static! {
 
 }
 
+const ANSI_COLORS: [&str; 16] = [
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "gray",
+    "darkgray",
+    "lightred",
+    "lightgreen",
+    "lightyellow",
+    "lightblue",
+    "lightmagenta",
+    "lightcyan",
+    "white",
+];
+
 mod default_config {
     // This is so the initial config file can contain explanatory comments
     pub(super) const DEFAULT_CONFIG_TOML: &str =
@@ -93,11 +112,9 @@ impl Config {
     }
 
     pub fn get_prompt(&self, label: &str) -> Option<&Prompt> {
-
         self.prompts.iter().find(|p| p.label == label)
-
-
     }
+
     pub fn data_dir(&self) -> &'static PathBuf {
         &DATA_DIR
     }
@@ -133,6 +150,27 @@ impl Config {
 
         // panics if api key is not present
         let _ = loaded_config.api_key();
+
+        if let Some(
+            bad_prompt @ Prompt {
+                color: Some(bad_color),
+                ..
+            },
+        ) = loaded_config.prompts.iter().find(|p| {
+            p.color
+                .as_deref()
+                .is_some_and(|c| !ANSI_COLORS.contains(&c.to_lowercase().trim()))
+        }) {
+            let err = format_err!(
+                "Invalid color '{}' in prompt '{}': not a valid ANSI color",
+                bad_color,
+                &bad_prompt.label
+            );
+
+            return Err(err);
+        }
+
+        for prompt in loaded_config.prompts.iter() {}
 
         Ok(loaded_config)
     }

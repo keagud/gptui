@@ -50,6 +50,8 @@ impl Thread {
         }
     }
 
+//    pub fn message_display_header(&self, role: Role) ->
+
     pub fn messages(&self) -> Vec<&Message> {
         self.messages.iter().collect()
     }

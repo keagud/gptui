@@ -56,6 +56,8 @@ pub enum Role {
 
 impl Role {
     pub fn tui_display_header(&self) -> Span {
+
+        
         match self {
             Role::User => Span::styled(
                 "User",
