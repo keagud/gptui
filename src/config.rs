@@ -41,7 +41,7 @@ mod default_config {
 struct Prompt {
     label: String,
     prompt: String,
-    color: Option<String>,
+    color: Option<String>
 }
 
 impl Default for Prompt {
