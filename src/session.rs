@@ -4,6 +4,10 @@ use crossbeam_channel::Receiver;
 use futures::{Stream, StreamExt};
 use futures_util::{pin_mut, TryStreamExt};
 use itertools::Itertools;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Span;
 use ratatui::text::{Line, Text};
 use ratatui::Frame;
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -12,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::collections::HashMap;
 use std::io::{self, sink, Sink, Stdout, Write};
+use std::str::FromStr;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use uuid::Uuid;
 
@@ -50,7 +55,34 @@ impl Thread {
         }
     }
 
-//    pub fn message_display_header(&self, role: Role) ->
+    pub fn message_display_header(&self, role: Role) -> Span {
+        match role {
+            Role::User => Span::styled(
+                "User",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Role::Assistant => {
+                let color = Color::from_str(self.prompt().color().unwrap_or("blue"))
+                    .expect("Could not parse color from string");
+
+                Span::styled(
+                    self.prompt().label(),
+                    Style::default()
+                        .fg(color)
+                        .add_modifier(Modifier::UNDERLINED),
+                )
+            }
+            Role::System => Span::styled(
+                "System",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+        }
+    }
 
     pub fn messages(&self) -> Vec<&Message> {
         self.messages.iter().collect()
@@ -71,7 +103,7 @@ impl Thread {
         let mut all_blocks = Vec::new();
 
         for msg in self.messages().iter().filter(|m| !m.is_system()) {
-            let header_line = Line::from(vec![msg.role.tui_display_header()]);
+            let header_line = Line::from(vec![self.message_display_header(msg.role)]);
 
             let text = msg.formatted_content(&mut block_counter, line_width);
 
@@ -252,7 +284,9 @@ impl Session {
         let model = "gpt-4";
         let id = Uuid::new_v4();
 
-        let thread = Thread::new(messages, model, id);
+        let mut thread = Thread::new(messages, model, id);
+        thread.prompt = prompt.clone();
+
         if self.threads.insert(id, thread).is_some() {
             Err(anyhow::format_err!("Thread ID was already present: {id}"))
         } else {

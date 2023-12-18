@@ -2,6 +2,7 @@ use anyhow::format_err;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -60,7 +61,7 @@ mod default_config {
         include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Prompt {
     label: String,
     prompt: String,
@@ -96,7 +97,7 @@ pub struct Config {
     syntax_theme: String,
     editor: Option<String>,
     api_key_var: Option<String>,
-    prompts: Vec<Prompt>,
+    prompts: HashSet<Prompt>,
 }
 
 impl Default for Config {
@@ -112,7 +113,9 @@ impl Config {
     }
 
     pub fn get_prompt(&self, label: &str) -> Option<&Prompt> {
-        self.prompts.iter().find(|p| p.label == label)
+        self.prompts
+            .iter()
+            .find(|p| p.label.to_lowercase() == label.to_lowercase())
     }
 
     pub fn data_dir(&self) -> &'static PathBuf {
@@ -151,6 +154,7 @@ impl Config {
         // panics if api key is not present
         let _ = loaded_config.api_key();
 
+        // confirm any user-set colors are valid
         if let Some(
             bad_prompt @ Prompt {
                 color: Some(bad_color),
@@ -169,8 +173,6 @@ impl Config {
 
             return Err(err);
         }
-
-        for prompt in loaded_config.prompts.iter() {}
 
         Ok(loaded_config)
     }

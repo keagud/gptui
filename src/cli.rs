@@ -88,7 +88,8 @@ pub fn run_cli() -> anyhow::Result<()> {
             let prompt = match prompt {
                 Some(prompt_label) => CONFIG
                     .get_prompt(prompt_label)
-                    .ok_or_else(|| format_err!("No prompt found with label '{prompt_label}'"))?.to_owned(),
+                    .ok_or_else(|| format_err!("No prompt found with label '{prompt_label}'"))?
+                    .to_owned(),
                 None => Prompt::default(),
             };
 

@@ -388,7 +388,7 @@ impl App {
 
         if self.is_recieving() {
             let mut incoming_lines = vec![Line::from(vec![
-                Role::Assistant.tui_display_header(),
+                self.thread()?.message_display_header(Role::Assistant),
                 "\n".into(),
             ])];
 
