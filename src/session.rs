@@ -43,6 +43,9 @@ pub struct Thread {
 
     #[serde(skip)]
     prompt: Prompt,
+
+    #[serde(skip)]
+    incoming: Option<Message>,
 }
 
 impl Thread {
@@ -96,13 +99,43 @@ impl Thread {
         self.messages.iter().flat_map(|m| m.code_blocks()).collect()
     }
 
+    pub fn set_incoming_message(&mut self, text: &str) {
+        self.incoming = Some(Message::new_asst(text));
+    }
+
+    /// Add token(s) to the incoming message in progress
+    pub fn update(&mut self, incoming_text: &str) {
+        if self.incoming.is_some() {
+            self.incoming
+                .as_mut()
+                .map(|m| m.content.push_str(incoming_text));
+        } else {
+            self.incoming = Some(Message::new_asst(incoming_text));
+        };
+    }
+    pub fn commit_message(&mut self) {
+        if let Some(msg) = self.incoming.take() {
+            self.add_message(msg);
+        }
+    }
+    pub fn clear_incoming_message(&mut self) {
+        self.incoming = None;
+    }
+
     /// Get all messages in this thread as they will be displayed
     pub fn tui_formatted_messages(&self, line_width: u16) -> Vec<Text> {
         let mut msgs_buf: Vec<Text> = Vec::new();
         let mut block_counter = 1usize;
         let mut all_blocks = Vec::new();
 
-        for msg in self.messages().iter().filter(|m| !m.is_system()) {
+        for msg in self
+            .messages
+            .iter()
+            .map(|m| Some(m))
+            .chain(std::iter::once(self.incoming.as_ref()))
+            .filter_map(|m| m)
+            .filter(|m| !m.is_system())
+        {
             let header_line = Line::from(vec![self.message_display_header(msg.role)]);
 
             let text = msg.formatted_content(&mut block_counter, line_width);

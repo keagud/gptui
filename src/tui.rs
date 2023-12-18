@@ -66,7 +66,6 @@ pub struct App {
     session: Session,
     thread_id: Option<uuid::Uuid>,
     reply_rx: Option<ReplyRx>,
-    incoming_message: String,
     user_message: String,
     tick_duration: std::time::Duration,
     chat_scroll: usize,
@@ -107,7 +106,6 @@ macro_rules! app_defaults {
                 session: $session,
                 thread_id: resolve_thread_id!($thread_id),
                 reply_rx: Default::default(),
-                incoming_message: String::new(),
                 user_message: String::new(),
                 chat_scroll: 0,
                 tick_duration,
@@ -331,12 +329,10 @@ impl App {
                             self.chat_scroll += SCROLL_STEP;
                         }
 
-                        self.incoming_message.push_str(&s)
+                        self.thread_mut()?.update(&s);
                     }
                     None => {
-                        let new_msg = Message::new_asst(&self.incoming_message);
-                        self.thread_mut()?.add_message(new_msg);
-                        self.incoming_message.clear();
+                        self.thread_mut()?.commit_message();
 
                         if let Some(a) = self.reply_rx.take() {
                             drop(a)
@@ -385,17 +381,6 @@ impl App {
             .unwrap_or("");
 
         let mut msgs_formatted = self.thread()?.tui_formatted_messages(content_line_width);
-
-        if self.is_recieving() {
-            let mut incoming_lines = vec![Line::from(vec![
-                self.thread()?.message_display_header(Role::Assistant),
-                "\n".into(),
-            ])];
-
-            incoming_lines.extend(self.incoming_message.lines().map(Line::from));
-
-            msgs_formatted.push(Text::from(incoming_lines));
-        }
 
         let box_color = if self.is_recieving() {
             Style::new().white()
