@@ -30,7 +30,6 @@ enum Commands {
     Resume { index: i64 },
 }
 
-fn pprint(_input: &str) {}
 
 fn clear_screen() -> anyhow::Result<()> {
     if cfg!(target_os = "windows") {
