@@ -73,6 +73,7 @@ pub struct App {
     copy_select_buf: String,
     copy_mode: bool,
     selected_block_index: Option<usize>,
+    content_line_width: u16
 }
 
 macro_rules! resolve_thread_id {
@@ -114,6 +115,7 @@ macro_rules! app_defaults {
                 copy_mode: false,
                 selected_block_index: None,
                 terminal: RefCell::new(term),
+                content_line_width: 0
             }),
 
             Err(e) => Err(anyhow::anyhow!(e)),
@@ -175,6 +177,28 @@ impl App {
         execute!(std::io::stderr(), LeaveAlternateScreen)?;
         disable_raw_mode()?;
         Ok(())
+    }
+
+    fn visible_text<'a>(
+        &self,
+        text: impl Into<Text<'a>>,
+        text_len: usize,
+        max_lines: u16,
+    ) -> Text<'a> {
+        let text: Text<'_> = text.into();
+
+        let s = if self.chat_scroll > text_len {
+            self.chat_scroll - text_len
+        } else {
+            self.chat_scroll
+        };
+
+        text.lines
+            .into_iter()
+            .skip(self.chat_scroll)
+            .take(max_lines.into())
+            .collect_vec()
+            .into()
     }
 
     /// helper function to clear the copy buffer and unset the copy mode state
