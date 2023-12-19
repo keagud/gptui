@@ -383,7 +383,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&self, frame: &mut Frame) -> anyhow::Result<()> {
+    fn ui(&mut self, frame: &mut Frame) -> anyhow::Result<()> {
         let h_padding = 5u16;
 
         let chunks = Layout::default()
@@ -392,7 +392,7 @@ impl App {
             .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
             .split(frame.size());
 
-        let content_line_width = chunks[0].width - (h_padding * 2) - 2;
+        self.content_line_width = chunks[0].width - (h_padding * 2) - 2;
 
         let first_msg = self
             .thread()?
@@ -400,7 +400,9 @@ impl App {
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let mut msgs_formatted = self.thread()?.tui_formatted_messages(content_line_width);
+        let mut msgs_formatted = self
+            .thread()?
+            .tui_formatted_messages(self.content_line_width);
 
         let box_color = if self.is_recieving() {
             Style::new().white()
@@ -436,7 +438,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(border_type)
                     .border_style(Style::default().fg(border_color))
-                    .title(string_preview(first_msg, content_line_width.into()).to_string())
+                    .title(string_preview(first_msg, self.content_line_width.into()).to_string())
                     .padding(ratatui::widgets::Padding {
                         left: h_padding,
                         right: h_padding,
@@ -461,7 +463,7 @@ impl App {
 
         if let Some(alert_msg) = alert_msg {
             input_block = input_block
-                .title(string_preview(&alert_msg, content_line_width.into()).to_string())
+                .title(string_preview(&alert_msg, self.content_line_width.into()).to_string())
                 .title_alignment(Alignment::Left)
                 .title_style(Style::default().cyan())
                 .title_position(ratatui::widgets::block::Position::Bottom);
