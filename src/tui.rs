@@ -61,7 +61,6 @@ macro_rules! concat_text {
 }
 
 pub struct App {
-    terminal: RefCell<CrosstermTerminal>,
     should_quit: bool,
     session: Session,
     thread_id: Option<uuid::Uuid>,
@@ -73,7 +72,8 @@ pub struct App {
     copy_select_buf: String,
     copy_mode: bool,
     selected_block_index: Option<usize>,
-    content_line_width: u16
+    content_line_width: u16,
+    should_show_editor: bool,
 }
 
 macro_rules! resolve_thread_id {
@@ -101,25 +101,21 @@ macro_rules! app_defaults {
     ($session:expr, $thread_id:ident) => {{
         let tick_duration = std::time::Duration::from_secs_f64(1.0 / FPS);
 
-        match CrosstermTerminal::new(CrosstermBackend::new(std::io::stderr())) {
-            Ok(term) => Ok(Self {
-                should_quit: false,
-                session: $session,
-                thread_id: resolve_thread_id!($thread_id),
-                reply_rx: Default::default(),
-                user_message: String::new(),
-                chat_scroll: 0,
-                tick_duration,
-                bottom_text: None,
-                copy_select_buf: String::new(),
-                copy_mode: false,
-                selected_block_index: None,
-                terminal: RefCell::new(term),
-                content_line_width: 0
-            }),
-
-            Err(e) => Err(anyhow::anyhow!(e)),
-        }
+        Ok(Self {
+            should_quit: false,
+            session: $session,
+            thread_id: resolve_thread_id!($thread_id),
+            reply_rx: Default::default(),
+            user_message: String::new(),
+            chat_scroll: 0,
+            tick_duration,
+            bottom_text: None,
+            copy_select_buf: String::new(),
+            copy_mode: false,
+            selected_block_index: None,
+            content_line_width: 0,
+            should_show_editor: false,
+        })
     }};
 
     ($session:expr) => {{
@@ -299,7 +295,7 @@ impl App {
 
                 // Open an external editor
                 KeyCode::Char('e') if matches!(key_modifiers, KeyModifiers::CONTROL) => {
-                    self.show_editor()?;
+                    self.should_show_editor = true;
                 }
                 //submit the message with alt-enter
                 KeyCode::Enter if matches!(key_modifiers, KeyModifiers::ALT) => {
@@ -497,28 +493,33 @@ impl App {
 
         App::startup()?;
 
+        let mut terminal = CrosstermTerminal::new(CrosstermBackend::new(std::io::stderr()))?;
+
         while !self.should_quit {
             self.update()?;
 
-            self.terminal
-                .borrow_mut()
-                .draw(|frame| self.ui(frame).unwrap())?;
+            terminal.draw(|frame| self.ui(frame).unwrap())?;
+
+            if self.should_show_editor {
+                self.show_editor(&mut terminal)?;
+                self.should_show_editor = false;
+            }
         }
 
         App::shutdown()?;
         Ok(())
     }
 
-    fn show_editor(&mut self) -> anyhow::Result<()> {
-        self.terminal.borrow_mut().clear()?;
-        self.terminal.borrow_mut().flush()?;
+    fn show_editor(&mut self, terminal: &mut CrosstermTerminal) -> anyhow::Result<()> {
+        terminal.clear()?;
+        terminal.flush()?;
 
         if let Some(editor_input) = input_from_editor()? {
             self.user_message = editor_input;
         }
 
         App::startup()?;
-        self.terminal.borrow_mut().clear()?;
+        terminal.clear()?;
         Ok(())
     }
 }
