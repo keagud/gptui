@@ -73,6 +73,8 @@ pub struct App {
     copy_mode: bool,
     selected_block_index: Option<usize>,
     content_line_width: u16,
+    text_len: usize,
+    chat_window_height: u16,
     should_show_editor: bool,
 }
 
@@ -108,6 +110,7 @@ macro_rules! app_defaults {
             reply_rx: Default::default(),
             user_message: String::new(),
             chat_scroll: 0,
+            text_len: 0,
             tick_duration,
             bottom_text: None,
             copy_select_buf: String::new(),
@@ -115,6 +118,7 @@ macro_rules! app_defaults {
             selected_block_index: None,
             content_line_width: 0,
             should_show_editor: false,
+            chat_window_height: 0
         })
     }};
 
@@ -175,19 +179,9 @@ impl App {
         Ok(())
     }
 
-    fn visible_text<'a>(
-        &self,
-        text: impl Into<Text<'a>>,
-        text_len: usize,
-        max_lines: u16,
-    ) -> Text<'a> {
+    fn visible_text<'a>(&self, text: impl Into<Text<'a>>, max_lines: u16) -> Text<'a> {
         let text: Text<'_> = text.into();
 
-        let s = if self.chat_scroll > text_len {
-            self.chat_scroll - text_len
-        } else {
-            self.chat_scroll
-        };
 
         text.lines
             .into_iter()
@@ -195,6 +189,11 @@ impl App {
             .take(max_lines.into())
             .collect_vec()
             .into()
+    }
+
+    fn scroll_down(&mut self) {
+        let max_scroll = self.text_len;
+
     }
 
     /// helper function to clear the copy buffer and unset the copy mode state
@@ -394,15 +393,28 @@ impl App {
 
         self.content_line_width = chunks[0].width - (h_padding * 2) - 2;
 
-        let first_msg = self
-            .thread()?
-            .first_message()
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
-
         let mut msgs_formatted = self
             .thread()?
             .tui_formatted_messages(self.content_line_width);
+
+        let mut counter = 0;
+        let msgs_text = Text::from(
+            msgs_formatted
+                .into_iter()
+                .flat_map(|m| {
+                    counter += m.lines.len();
+                    m.lines
+                })
+                .collect_vec(),
+        );
+
+        let window_height = chunks[0].height as usize;
+
+        let (border_color, border_type) = if self.copy_mode {
+            (Color::Magenta, BorderType::Thick)
+        } else {
+            (Color::default(), BorderType::Rounded)
+        };
 
         let box_color = if self.is_recieving() {
             Style::new().white()
@@ -410,27 +422,11 @@ impl App {
             Style::new().blue()
         };
 
-        let msg_lines = msgs_formatted
-            .into_iter()
-            .flat_map(|m| m.lines)
-            .collect_vec();
-
-        let msgs_text = Text::from(msg_lines);
-
-        let window_height = chunks[0].height as usize;
-
-        let scroll: u16 = if window_height > msgs_text.height() {
-            // if window is larger than text, no need to scroll
-            0usize
-        } else {
-            self.chat_scroll
-        } as u16;
-
-        let (border_color, border_type) = if self.copy_mode {
-            (Color::Magenta, BorderType::Thick)
-        } else {
-            (Color::default(), BorderType::Rounded)
-        };
+        let first_msg = self
+            .thread()?
+            .first_message()
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
 
         let chat_window = Paragraph::new(msgs_text)
             .block(
@@ -445,8 +441,7 @@ impl App {
                         ..Default::default()
                     }),
             )
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0));
+            .wrap(Wrap { trim: false });
 
         frame.render_widget(chat_window, chunks[0]);
 
@@ -475,6 +470,8 @@ impl App {
 
         frame.render_widget(input_widget, chunks[1]);
 
+        self.text_len = counter;
+        self.chat_window_height = chunks[0].height;
         Ok(())
     }
 
