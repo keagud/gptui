@@ -118,7 +118,7 @@ macro_rules! app_defaults {
             selected_block_index: None,
             content_line_width: 0,
             should_show_editor: false,
-            chat_window_height: 0
+            chat_window_height: 0,
         })
     }};
 
@@ -179,21 +179,28 @@ impl App {
         Ok(())
     }
 
-    fn visible_text<'a>(&self, text: impl Into<Text<'a>>, max_lines: u16) -> Text<'a> {
-        let text: Text<'_> = text.into();
+    fn max_scroll(&self) -> usize {
+        if (self.chat_window_height as usize) > self.text_len {
+            0usize
+        } else {
+            self.text_len
+                .saturating_sub(self.chat_window_height as usize)
+        }
+    }
 
+    fn visible_text<'a>(&self, text: impl Into<Text<'a>>) -> Text<'a> {
+        let text: Text<'_> = text.into();
 
         text.lines
             .into_iter()
             .skip(self.chat_scroll)
-            .take(max_lines.into())
+            .take(self.chat_window_height.into())
             .collect_vec()
             .into()
     }
 
     fn scroll_down(&mut self) {
         let max_scroll = self.text_len;
-
     }
 
     /// helper function to clear the copy buffer and unset the copy mode state
@@ -281,7 +288,10 @@ impl App {
 
                 // scroll history down
                 KeyCode::Down => {
-                    self.chat_scroll = self.chat_scroll.saturating_add(SCROLL_STEP);
+                    self.chat_scroll = self
+                        .chat_scroll
+                        .saturating_add(SCROLL_STEP)
+                        .clamp(0, self.max_scroll());
                 }
 
                 // if already in copy mode, forward event to its handler
@@ -340,14 +350,11 @@ impl App {
     }
 
     fn update_recieving(&mut self) -> anyhow::Result<()> {
+        self.chat_scroll = self.max_scroll();
         if let Some(rx) = self.reply_rx.as_ref() {
             {
                 match rx.recv()? {
                     Some(s) => {
-                        if s.contains('\n') {
-                            self.chat_scroll += SCROLL_STEP;
-                        }
-
                         self.thread_mut()?.update(&s);
                     }
                     None => {
@@ -373,6 +380,10 @@ impl App {
             }
 
             Some(_) => {
+                // flush keyboard input while recieving
+                if has_key_input {
+                    let _ = crossterm::event::read();
+                }
                 self.update_recieving()?;
             }
 
@@ -397,18 +408,16 @@ impl App {
             .thread()?
             .tui_formatted_messages(self.content_line_width);
 
-        let mut counter = 0;
-        let msgs_text = Text::from(
-            msgs_formatted
-                .into_iter()
-                .flat_map(|m| {
-                    counter += m.lines.len();
-                    m.lines
-                })
-                .collect_vec(),
-        );
+        let msg_lines = msgs_formatted
+            .into_iter()
+            .flat_map(|m| m.lines)
+            .collect_vec();
 
-        let window_height = chunks[0].height as usize;
+        let text_len = msg_lines.len();
+
+        let window_height = chunks[0].height;
+
+        let msgs_text = self.visible_text(msg_lines);
 
         let (border_color, border_type) = if self.copy_mode {
             (Color::Magenta, BorderType::Thick)
@@ -470,7 +479,7 @@ impl App {
 
         frame.render_widget(input_widget, chunks[1]);
 
-        self.text_len = counter;
+        self.text_len = text_len;
         self.chat_window_height = chunks[0].height;
         Ok(())
     }
@@ -493,6 +502,11 @@ impl App {
         App::startup()?;
 
         let mut terminal = CrosstermTerminal::new(CrosstermBackend::new(std::io::stderr()))?;
+
+        // initial draw to initialize internal ui state variables
+        self.update()?;
+        terminal.draw(|frame| self.ui(frame).unwrap())?;
+        self.chat_scroll = self.max_scroll();
 
         while !self.should_quit {
             self.update()?;
