@@ -24,7 +24,7 @@ fn editor_binary() -> anyhow::Result<String> {
 /// When the editor is closed, if the file has any non-whitespace content,
 /// return Ok(Some(content)).
 /// Otherwise return Ok(None).
-pub fn input_from_editor() -> anyhow::Result<Option<String>> {
+pub fn input_from_editor(existing_input: &str) -> anyhow::Result<Option<String>> {
     let temp_filename = uuid::Uuid::new_v4().simple().to_string();
     let editor = editor_binary()?;
 
@@ -34,7 +34,7 @@ pub fn input_from_editor() -> anyhow::Result<Option<String>> {
         .to_string_lossy()
         .to_string();
 
-    fs::File::create(&temp_filepath)?;
+    fs::write(&temp_filepath, existing_input)?;
 
     Command::new(editor)
         .arg(&temp_filepath)

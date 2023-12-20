@@ -527,7 +527,7 @@ impl App {
         terminal.clear()?;
         terminal.flush()?;
 
-        if let Some(editor_input) = input_from_editor()? {
+        if let Some(editor_input) = input_from_editor(&self.user_message)? {
             self.user_message = editor_input;
         }
 
