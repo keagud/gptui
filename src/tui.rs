@@ -358,11 +358,8 @@ impl App {
                         self.thread_mut()?.update(&s);
                     }
                     None => {
-                        self.thread_mut()?.commit_message();
-
-                        if let Some(a) = self.reply_rx.take() {
-                            drop(a)
-                        }
+                        self.thread_mut()?.commit_message()?;
+                        self.reply_rx = None;
                     }
                 }
             }
@@ -431,11 +428,7 @@ impl App {
             Style::new().blue()
         };
 
-        let first_msg = self
-            .thread()?
-            .first_message()
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
+        let chat_title = self.thread()?.thread_title().unwrap_or("...");
 
         let chat_window = Paragraph::new(msgs_text)
             .block(
@@ -443,7 +436,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(border_type)
                     .border_style(Style::default().fg(border_color))
-                    .title(string_preview(first_msg, self.content_line_width.into()).to_string())
+                    .title(string_preview(chat_title, self.content_line_width.into()).to_string())
                     .padding(ratatui::widgets::Padding {
                         left: h_padding,
                         right: h_padding,

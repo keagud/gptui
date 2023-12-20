@@ -1,3 +1,4 @@
+use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
@@ -40,6 +41,9 @@ pub struct Thread {
 
     #[serde(skip)]
     incoming: Option<Message>,
+
+    #[serde(skip)]
+    thread_title: Option<String>,
 }
 
 impl Thread {
@@ -50,6 +54,14 @@ impl Thread {
             id,
             ..Default::default()
         }
+    }
+
+    pub fn thread_title(&self) -> Option<&str> {
+        self.thread_title.as_ref().map(|s| s.as_ref())
+    }
+
+    pub fn set_title(&mut self, title: &str) {
+        self.thread_title = Some(title.into())
     }
 
     pub fn message_display_header(&self, role: Role) -> Span {
@@ -81,6 +93,13 @@ impl Thread {
         }
     }
 
+    pub fn non_sys_messages(&self) -> Vec<&Message> {
+        self.messages
+            .iter()
+            .filter(|m| !m.is_system())
+            .collect_vec()
+    }
+
     pub fn messages(&self) -> Vec<&Message> {
         self.messages.iter().collect()
     }
@@ -107,10 +126,16 @@ impl Thread {
     }
 
     /// Commit the completed message to the thread, and reset state for the next incoming message
-    pub fn commit_message(&mut self) {
+    pub fn commit_message(&mut self) -> anyhow::Result<()> {
         if let Some(msg) = self.incoming.take() {
             self.messages.push(msg);
+
+            if self.thread_title().is_none() && self.non_sys_messages().len() >= 2 {
+                self.update_thread_name()?;
+            }
         }
+
+        Ok(())
     }
     pub fn clear_incoming_message(&mut self) {
         self.incoming = None;
@@ -185,7 +210,12 @@ impl Thread {
         self.messages.iter().last()
     }
 
-    fn fetch_thread_name(&self) -> anyhow::Result<()> {
+    pub fn update_thread_name(&mut self) -> anyhow::Result<()> {
+        self.thread_title = Some(self.fetch_thread_name()?);
+        Ok(())
+    }
+
+    pub fn fetch_thread_name(&self) -> anyhow::Result<String> {
         let client = create_client::<BlockingClient>()?;
 
         let chat_content = self
@@ -221,9 +251,15 @@ impl Thread {
             }]
         });
 
-        client.post(OPENAI_URL).json(&body);
+        let response: serde_json::Value = client.post(OPENAI_URL).json(&body).send()?.json()?;
 
-        Ok(())
+        let title = response
+            .pointer("/choices/0/message/content")
+            .map(|s| s.as_str())
+            .flatten()
+            .ok_or(format_err!("Could not parse JSON response"))?;
+
+        Ok(title.into())
     }
 }
 

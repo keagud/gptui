@@ -4,6 +4,7 @@ use crate::config::CONFIG;
 use crate::session::{Message, Role, Thread};
 
 use directories::BaseDirs;
+use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection};
 use std::io;
 use std::path::PathBuf;
@@ -21,6 +22,11 @@ const SCHEMA_CMD: &str = r#"
       content VARCHAR,
       timestamp FLOAT,
       FOREIGN KEY (thread_id) REFERENCES thread (id)
+    );
+
+    CREATE TABLE title(
+      id VARCHAR PRIMARY KEY,
+      content TEXT
     );
 
 "#;
@@ -55,6 +61,13 @@ impl DbStore for Thread {
             "INSERT OR IGNORE INTO thread (id, model) VALUES (?1, ?2)",
             [&self.str_id(), &self.model],
         )?;
+
+        if let Some(title) = self.thread_title() {
+            conn.execute(
+                "INSERT OR IGNORE INTO title (id, content) VALUES (?1, ?2)",
+                [&self.str_id(), title],
+            )?;
+        }
 
         // get the most recent message in the db for this thread
         //
@@ -129,7 +142,18 @@ impl DbStore for Thread {
             })?
             .collect::<anyhow::Result<Vec<Message>>>()?;
 
-        Ok(Thread::new(messages, &model, id))
+        let title = conn
+            .prepare("SELECT content FROM title WHERE id = ?1")?
+            .query_row([&id_str], |row| row.get::<_, String>(0))
+            .optional()?;
+
+        let mut new_thread = Thread::new(messages, &model, id);
+
+        if let Some(ref title) = title {
+            new_thread.set_title(title);
+        }
+
+        Ok(new_thread)
     }
 
     fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>> {
