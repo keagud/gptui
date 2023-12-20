@@ -41,3 +41,4 @@ tokio-util = { version = "0.7.10", features = ["full"] }
 toml = "0.8.8"
 tui-textarea = "0.4.0"
 uuid = { version = "1.6.1", features = ["v4"] }
+which = "5.0.0"

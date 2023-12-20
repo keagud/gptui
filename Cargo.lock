@@ -552,7 +552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c562aa71f7bc691fde4c6bf5f93ae5a5298b617c2eb44c76c87832299a17fbb4"
 dependencies = [
  "tempfile",
- "which",
+ "which 4.4.2",
 ]
 
 [[package]]
@@ -816,6 +816,7 @@ dependencies = [
  "toml",
  "tui-textarea",
  "uuid",
+ "which 5.0.0",
 ]
 
 [[package]]
@@ -2400,6 +2401,19 @@ dependencies = [
  "home",
  "once_cell",
  "rustix",
+]
+
+[[package]]
+name = "which"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bf3ea8596f3a0dd5980b46430f2058dfe2c36a27ccfbb1845d6fbfcd9ba6e14"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
