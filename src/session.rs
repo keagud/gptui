@@ -10,8 +10,9 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::text::{Line, Text};
 use ratatui::Frame;
+use reqwest::blocking::Client as BlockingClient;
 use reqwest::header::{self, HeaderMap, HeaderValue};
-use reqwest::Client;
+use reqwest::Client as AsyncClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::collections::HashMap;
@@ -25,13 +26,6 @@ use crate::db::{init_db, DbStore};
 pub use crate::message::{CodeBlock, Message, Role};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
-const MAX_TOKENS: usize = 200;
-
-lazy_static::lazy_static! {
-    static ref CLIENT: reqwest::Client = create_client()
-        .expect("HTTP client initialization failed");
-
-}
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct Thread {
@@ -191,28 +185,94 @@ impl Thread {
         self.messages.iter().last()
     }
 
-    pub fn annotated_messages(&self) {}
+    fn fetch_thread_name(&self) -> anyhow::Result<()> {
+        let client = create_client::<BlockingClient>()?;
+
+        let chat_content = self
+            .messages()
+            .iter()
+            .filter(|m| !m.is_system())
+            .map(|m| {
+                let msg_label = match m.role {
+                    Role::Assistant => "Assistant",
+                    Role::User => "User",
+                    _ => unreachable!(),
+                };
+
+                format!("{}:\n{}\n", msg_label, &m.content)
+            })
+            .join("\n");
+
+        let prompt = r"
+        Your task is to provide brief descriptive titles to message threads. 
+        Each title should be no more than 100 characters in length.
+        Your response should consist of the title and nothing else.";
+
+        let body = json!({
+        "model" : "gpt-3.5-turbo",
+        "messages": [
+            {
+            "role" : "system",
+            "content" : prompt
+            },
+            {
+                "role" : "user",
+                "content" : &chat_content
+            }]
+        });
+
+        client.post(OPENAI_URL).json(&body);
+
+        Ok(())
+    }
 }
 
-/// Create a reqwest::Client with the correct default authorization headers
-fn create_client() -> anyhow::Result<Client> {
-    let headers: HeaderMap = [
-        (
-            header::AUTHORIZATION,
-            HeaderValue::from_str(format!("Bearer {}", CONFIG.api_key()).as_str())?,
-        ),
-        (
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        ),
-    ]
-    .into_iter()
-    .collect();
+macro_rules! build_client {
+    () => {{
+        let headers: HeaderMap = [
+            (
+                header::AUTHORIZATION,
+                HeaderValue::from_str(format!("Bearer {}", CONFIG.api_key()).as_str())
+                    .expect("Failed to format auth headers"),
+            ),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
+        ]
+        .into_iter()
+        .collect();
 
-    Client::builder()
-        .default_headers(headers)
-        .build()
-        .map_err(|e| e.into())
+        Self::builder()
+            .default_headers(headers)
+            .build()
+            .map_err(|e| anyhow::anyhow!(e))
+    }};
+}
+
+macro_rules! impl_client {
+    ($struct:ident) => {
+        impl HttpClient for $struct {
+            fn init() -> anyhow::Result<Self> {
+                build_client!()
+            }
+        }
+    };
+}
+
+trait HttpClient: Sized {
+    fn init() -> anyhow::Result<Self>;
+}
+
+impl_client!(AsyncClient);
+impl_client!(BlockingClient);
+
+/// Create a reqwest::Client with the correct default authorization headers
+fn create_client<T>() -> anyhow::Result<T>
+where
+    T: HttpClient,
+{
+    T::init()
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -377,7 +437,7 @@ pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<St
         ));
     }
 
-    let client = create_client()?;
+    let client = create_client::<AsyncClient>()?;
 
     let (tx, rx) = bounded(100);
 
