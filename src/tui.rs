@@ -1,22 +1,19 @@
-use std::cell::RefCell;
-use std::process;
-use std::{borrow::Cow, process::Stdio};
+use std::borrow::Cow;
 
 use crate::editor::input_from_editor;
-use anyhow::format_err;
+
 use crossbeam_channel::Receiver;
-use edit::get_editor;
+
 use itertools::Itertools;
 
 use ratatui::{
     prelude::{Alignment, Constraint, CrosstermBackend, Direction, Layout},
     style::{Color, Style, Stylize},
-    text::{Line, Span, Text},
+    text::Text,
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 
-use serde::de::value::CowStrDeserializer;
 use uuid::Uuid;
 
 use crossterm::{
@@ -30,10 +27,8 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use ctrlc::set_handler;
-
 use crate::clip;
-use crate::session::{stream_thread_reply, Message, Role, Session, Thread};
+use crate::session::{stream_thread_reply, Message, Session, Thread};
 
 type ReplyRx = Receiver<Option<String>>;
 
@@ -42,23 +37,6 @@ type CrosstermTerminal = ratatui::Terminal<Backend>;
 
 const FPS: f64 = 30.0;
 const SCROLL_STEP: usize = 1;
-
-fn extend_text<'a>(text1: Text<'a>, text2: Text<'a>) -> Text<'a> {
-    let mut t = text1.clone();
-    t.extend(text2.lines);
-    t
-}
-
-macro_rules! concat_text {
-    ($t1:expr,$t2:expr) => {{
-        extend_text($t1, $t2)
-    }};
-
-    ($t1:expr, $t2:expr, $($rest:expr),+) => {
-        { concat_text!(concat_text!($t1, $t2), $($rest),+) }
-
-    };
-}
 
 pub struct App {
     should_quit: bool,
@@ -150,9 +128,6 @@ fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
 }
 
 impl App {
-    fn messages(&self) -> anyhow::Result<Vec<&Message>> {
-        self.thread().map(|t| t.messages())
-    }
     fn thread(&self) -> anyhow::Result<&Thread> {
         thread_missing! {
         self.thread_id.and_then(|id| self.session.thread_by_id(id))
@@ -197,10 +172,6 @@ impl App {
             .take(self.chat_window_height.into())
             .collect_vec()
             .into()
-    }
-
-    fn scroll_down(&mut self) {
-        let max_scroll = self.text_len;
     }
 
     /// helper function to clear the copy buffer and unset the copy mode state
@@ -401,7 +372,7 @@ impl App {
 
         self.content_line_width = chunks[0].width - (h_padding * 2) - 2;
 
-        let mut msgs_formatted = self
+        let msgs_formatted = self
             .thread()?
             .tui_formatted_messages(self.content_line_width);
 
@@ -412,7 +383,7 @@ impl App {
 
         let text_len = msg_lines.len();
 
-        let window_height = chunks[0].height;
+        let _window_height = chunks[0].height;
 
         let msgs_text = self.visible_text(msg_lines);
 
@@ -481,8 +452,8 @@ impl App {
         app_defaults!(session, thread_id)
     }
 
-    pub fn new(prompt: &str) -> anyhow::Result<Self> {
-        let mut session = Session::new()?;
+    pub fn new(_prompt: &str) -> anyhow::Result<Self> {
+        let session = Session::new()?;
 
         app_defaults!(session)
     }

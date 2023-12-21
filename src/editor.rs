@@ -1,10 +1,8 @@
-use directories::BaseDirs;
 use edit::get_editor;
 use std::env::temp_dir;
-use std::io::{ErrorKind, Read};
+use std::fs;
+use std::io::ErrorKind;
 use std::process::{Command, Stdio};
-use std::{fs, io};
-use tempfile::tempfile;
 
 fn editor_binary() -> anyhow::Result<String> {
     #[cfg(target_family = "windows")]

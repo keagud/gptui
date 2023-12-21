@@ -1,30 +1,27 @@
+use crate::config::{Prompt, CONFIG};
+use crate::db::{init_db, DbStore};
+pub use crate::message::{CodeBlock, Message, Role};
+
 use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
-use futures::{Stream, StreamExt};
-use futures_util::{pin_mut, TryStreamExt};
+use futures::StreamExt;
+use futures_util::TryStreamExt;
 use itertools::Itertools;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::text::{Line, Text};
-use ratatui::Frame;
 use reqwest::blocking::Client as BlockingClient;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client as AsyncClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::collections::HashMap;
-use std::io::{self, sink, Sink, Stdout, Write};
 use std::str::FromStr;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use uuid::Uuid;
-
-use crate::config::{Prompt, CONFIG};
-use crate::db::{init_db, DbStore};
-pub use crate::message::{CodeBlock, Message, Role};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 
@@ -119,7 +116,9 @@ impl Thread {
     /// Add token(s) to the incoming message in progress
     pub fn update(&mut self, incoming_text: &str) {
         if self.incoming.is_some() {
-            self.incoming.as_mut().map(|m| m.update(incoming_text));
+            if let Some(m) = self.incoming.as_mut() {
+                m.update(incoming_text)
+            }
         } else {
             self.incoming = Some(Message::new_asst(incoming_text));
         };
@@ -150,9 +149,9 @@ impl Thread {
         for msg in self
             .messages
             .iter()
-            .map(|m| Some(m))
+            .map(Some)
             .chain(std::iter::once(self.incoming.as_ref()))
-            .filter_map(|m| m)
+            .flatten()
             .filter(|m| !m.is_system())
         {
             let header_line = Line::from(vec![self.message_display_header(msg.role)]);
@@ -255,8 +254,7 @@ impl Thread {
 
         let title = response
             .pointer("/choices/0/message/content")
-            .map(|s| s.as_str())
-            .flatten()
+            .and_then(|s| s.as_str())
             .ok_or(format_err!("Could not parse JSON response"))?;
 
         Ok(title.into())
@@ -397,13 +395,6 @@ impl Session {
 
         Ok(())
     }
-    fn add_thread_message(&mut self, id: Uuid, message: Message) -> anyhow::Result<()> {
-        self.thread_by_id_mut(id)
-            .ok_or(anyhow::format_err!("{id} is not a thread id"))?
-            .add_message(message);
-
-        Ok(())
-    }
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
@@ -511,13 +502,13 @@ pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<St
                 if let Some(chunks) = parsed {
                     for chunk in chunks.iter() {
                         if let Some(s) = chunk.token() {
-                            tx.send(Some(s));
+                            tx.send(Some(s))?;
                         }
                     }
                 }
             }
 
-            tx.send(None);
+            tx.send(None)?;
 
             Ok(())
         });

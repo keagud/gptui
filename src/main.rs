@@ -1,12 +1,7 @@
 use gpt::cli::run_cli;
-use gpt::message::Message;
 use gpt::session::Session;
 
-#[cfg(debug_assertions)]
-
 fn main() -> anyhow::Result<()> {
-    use gpt::config::Prompt;
-
     #[cfg(debug_assertions)]
     {
         if let Some(arg) = std::env::args_os()
@@ -14,12 +9,8 @@ fn main() -> anyhow::Result<()> {
             .map(|a| a.to_string_lossy().to_string())
             .filter(|a| a.starts_with("__"))
         {
-            match arg.as_str() {
-                "__make_config" => {
-                    gpt::config::Config::write_default().unwrap();
-                }
-
-                _ => (),
+            if arg.as_str() == "__make_config" {
+                gpt::config::Config::write_default().unwrap();
             }
 
             std::process::exit(0);

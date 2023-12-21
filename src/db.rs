@@ -1,13 +1,9 @@
-use std::fs;
-
 use crate::config::CONFIG;
 use crate::session::{Message, Role, Thread};
 
-use directories::BaseDirs;
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection};
-use std::io;
-use std::path::PathBuf;
+
 use uuid::Uuid;
 
 const SCHEMA_CMD: &str = r#"

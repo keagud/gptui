@@ -1,12 +1,7 @@
 use anyhow::format_err;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
-};
+use std::{collections::HashSet, fs, path::PathBuf};
 
 use toml;
 
@@ -138,7 +133,6 @@ impl Config {
         std::env::var_os(key_varname)
             .map(|s| s.to_string_lossy().to_string())
             .expect("No API key was found in the environment")
-            .into()
     }
 
     pub fn load() -> anyhow::Result<Self> {
@@ -183,7 +177,7 @@ impl Config {
     fn save(&self) -> anyhow::Result<()> {
         let toml_str = toml::to_string_pretty(self)?;
 
-        fs::write(Self::path(), &toml_str)?;
+        fs::write(Self::path(), toml_str)?;
 
         Ok(())
     }

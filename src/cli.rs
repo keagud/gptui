@@ -1,23 +1,12 @@
 use crate::{
     config::{Prompt, CONFIG},
-    session::{Message, Role, Session},
+    session::Session,
 };
 use anyhow;
 use anyhow::format_err;
-
 use clap::{Parser, Subcommand};
-use crossterm::{
-    self,
-    terminal::{Clear, ClearType},
-};
-use futures::StreamExt;
-
-use std::io::{self, Read, Write};
 
 use crate::tui::App;
-const DEFAULT_PROMPT: &str = r#"You are a helpful assistant"#;
-const INPUT_INDICATOR: &str = ">> ";
-const BLOCK_DELIMITER: &str = r"```";
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -36,20 +25,6 @@ enum Commands {
     Resume {
         index: i64,
     },
-}
-
-fn clear_screen() -> anyhow::Result<()> {
-    if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd")
-            .args(["/c", "cls"])
-            .status()?;
-    } else {
-        std::process::Command::new("clear").status()?;
-    }
-
-    io::stdout().flush()?;
-
-    Ok(())
 }
 
 pub fn run_cli() -> anyhow::Result<()> {

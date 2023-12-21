@@ -4,7 +4,7 @@ use arboard::Clipboard;
 
 #[cfg(target_os = "linux")]
 mod linux_no_de {
-    use super::*;
+
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;

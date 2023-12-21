@@ -5,11 +5,10 @@ use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, StyledGrapheme, Text};
 use serde::{Deserialize, Serialize};
-use std::default;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxReference;
-use syntect::util::LinesWithEndings;
 
 #[allow(unused)]
 use itertools::Itertools;
@@ -56,8 +55,6 @@ pub enum Role {
 
 impl Role {
     pub fn tui_display_header(&self) -> Span {
-
-        
         match self {
             Role::User => Span::styled(
                 "User",
@@ -152,7 +149,6 @@ impl Message {
     pub fn update(&mut self, text: &str) {
         self.content.push_str(text);
         self.update_blocks();
-
     }
 
     pub fn new_from_db(role: Role, content: String, timestamp_epoch: f64) -> Self {
@@ -238,7 +234,7 @@ impl Message {
 }
 
 /// collect a group of styled graphemes into equivalent spans
-fn coalesce_graphemes<'a, T>(mut graphemes: T) -> Vec<Span<'a>>
+fn coalesce_graphemes<'a, T>(graphemes: T) -> Vec<Span<'a>>
 where
     T: IntoIterator<Item = StyledGrapheme<'a>>,
 {
@@ -295,7 +291,7 @@ impl CodeBlock {
     }
 
     pub fn highlighted_text(&self, index: usize, line_width: u16) -> Text<'_> {
-        let mut hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
+        let _hl = HighlightLines::new(self.syntax(), &THEME_SET.themes[DEFAULT_THEME]);
 
         let bg_color = THEME_SET.themes[DEFAULT_THEME].settings.background.map(
             |syntect::highlighting::Color { r, g, b, .. }| ratatui::style::Color::Rgb(r, g, b),
