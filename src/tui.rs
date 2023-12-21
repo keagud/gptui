@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use crate::editor::input_from_editor;
+use crate::session::string_preview;
 
 use crossbeam_channel::Receiver;
 
@@ -109,22 +110,6 @@ macro_rules! thread_missing {
     ($opt:expr) => {
         $opt.ok_or_else(|| anyhow::format_err!("Not connected to a thread"))
     };
-}
-
-// get an initial slice of a string, ending with elipsis,
-//desired_length is the maximum final length including elipsis.
-fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
-    if text.len() <= desired_length {
-        return text.into();
-    }
-
-    Cow::from(
-        text.chars()
-            .take(desired_length.saturating_sub(3))
-            .chain("...".chars())
-            .take(desired_length)
-            .join(""),
-    )
 }
 
 impl App {

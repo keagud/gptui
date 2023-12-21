@@ -35,12 +35,9 @@ pub fn run_cli() -> anyhow::Result<()> {
     match &cli.command {
         Commands::List => {
             for (i, thread) in session.ordered_threads().iter().map(|(_, x)| x).enumerate() {
-                println!(
-                    "({}) {} {}",
-                    i + 1,
-                    thread.init_time().unwrap(),
-                    thread.first_message().unwrap().content
-                )
+                if let Some(list_preview) = thread.list_preview() {
+                    println!("({}) {}", i + 1, &list_preview)
+                }
             }
         }
 

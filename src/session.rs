@@ -19,12 +19,28 @@ use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client as AsyncClient;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 
+// get an initial slice of a string, ending with elipsis,
+//desired_length is the maximum final length including elipsis.
+pub fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
+    if text.len() <= desired_length {
+        return text.into();
+    }
+
+    Cow::from(
+        text.chars()
+            .take(desired_length.saturating_sub(3))
+            .chain("...".chars())
+            .take(desired_length)
+            .join(""),
+    )
+}
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct Thread {
     messages: Vec<Message>,
@@ -61,6 +77,21 @@ impl Thread {
         self.thread_title = Some(title.into())
     }
 
+    pub fn list_preview(&self) -> Option<String> {
+        let local_time_fmt = self
+            .init_time()?
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M");
+
+        let preview_msg = if let Some(title) = self.thread_title() {
+            title.to_string()
+        } else {
+            self.first_message()
+                .map(|m| string_preview(&m.content, 200).to_string())?
+        };
+
+        Some(format!("{} {}", local_time_fmt, preview_msg))
+    }
     pub fn message_display_header(&self, role: Role) -> Span {
         match role {
             Role::User => Span::styled(
