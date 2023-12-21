@@ -15,7 +15,9 @@ lazy_static::lazy_static! {
         std::fs::create_dir_all(&dir).expect("Failed to create debug config directory");
         dir
     } else {
-        PathBuf::from(PROJECT_DIRS.config_dir())
+        let dir =  PathBuf::from(PROJECT_DIRS.config_dir());
+        std::fs::create_dir_all(&dir).expect("Failed to create config directory");
+        dir
     };
 
 
@@ -24,7 +26,9 @@ lazy_static::lazy_static! {
         std::fs::create_dir_all(&dir).expect("Failed to create debug data directory");
         dir
     } else {
-        PathBuf::from(PROJECT_DIRS.data_dir())
+        let dir = PathBuf::from(PROJECT_DIRS.data_dir());
+        std::fs::create_dir_all(&dir).expect("Failed to create data directory");
+        dir
     };
 
     pub static ref CONFIG: Config = Config::load().expect("Failed to load config file");
@@ -87,7 +91,7 @@ impl Default for Prompt {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     syntax_theme: String,
     editor: Option<String>,
@@ -138,12 +142,14 @@ impl Config {
     pub fn load() -> anyhow::Result<Self> {
         let loaded_config = if !Self::path().try_exists()? {
             // If no config present, save the default one
+            std::fs::create_dir_all(CONFIG_DIR.as_path())?;
             std::fs::write(Self::path(), default_config::DEFAULT_CONFIG_TOML)?;
             Self::default()
         } else {
             let loaded_config_str = fs::read_to_string(Self::path())?;
             toml::from_str(&loaded_config_str)?
         };
+
 
         // panics if api key is not present
         let _ = loaded_config.api_key();
