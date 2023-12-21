@@ -34,10 +34,13 @@ pub fn run_cli() -> anyhow::Result<()> {
 
     match &cli.command {
         Commands::List => {
-            for (i, thread) in session.ordered_threads().iter().map(|(_, x)| x).enumerate() {
-                if let Some(list_preview) = thread.list_preview() {
-                    println!("({}) {}", i + 1, &list_preview)
-                }
+            for (i, list_preview) in session
+                .ordered_threads()
+                .iter()
+                .filter_map(|(_, t)| t.list_preview())
+                .enumerate()
+            {
+                println!("({}) {}", i + 1, &list_preview);
             }
         }
 

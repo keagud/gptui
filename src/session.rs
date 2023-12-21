@@ -460,7 +460,7 @@ impl Session {
     pub fn ordered_threads(&self) -> Vec<(&Uuid, &Thread)> {
         self.threads
             .iter()
-            .filter(|(_, t)| !t.messages.is_empty())
+            .filter(|(_, t)| !t.non_sys_messages().is_empty())
             .sorted_by_key(|(_, t)| t.init_time().expect("Thread has no messages"))
             .collect_vec()
     }
