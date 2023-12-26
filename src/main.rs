@@ -1,5 +1,5 @@
-use gpt::cli::run_cli;
-use gpt::session::Session;
+use gptui::cli::run_cli;
+use gptui::session::Session;
 
 fn main() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
@@ -10,7 +10,7 @@ fn main() -> anyhow::Result<()> {
             .filter(|a| a.starts_with("__"))
         {
             if arg.as_str() == "__make_config" {
-                gpt::config::Config::write_default().unwrap();
+                gptui::config::Config::write_default().unwrap();
             }
 
             std::process::exit(0);
