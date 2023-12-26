@@ -1,6 +1,6 @@
 # GPTui
 
-**GPTui** is a fairly simple (TUI)[https://en.wikipedia.org/wiki/Text-based_user_interface] for interacting with the OpenAI Chat Completions API.
+**GPTui** is a fairly simple [TUI](https://en.wikipedia.org/wiki/Text-based_user_interface) for interacting with the OpenAI Chat Completions API.
 
 ## Why does this exist?
 I prefer the question-and-answer style of interaction with LLMS for programming assistance (as opposed to something like Copilot's autocomplete), and I wanted to make an interface designed with that in mind, that could also slot into my existing CLI/TUI based workflow. If you're a fellow vim/tmux/alacritty enjoyer, consider giving it a shot!
@@ -16,7 +16,7 @@ I prefer the question-and-answer style of interaction with LLMS for programming 
 - All in 100% safe, blazingly fast rust! (*blazing-fastness may vary based on network conditions*)
 
 ## Authentication
-You'll need an (OpenAI API key)[https://platform.openai.com/docs/api-reference/authentication] to get started. Anecdotally, GPTui is pretty cheap, even with heavy usage, since it's all text and doesn't use any of the multi-modal bells and whistles of the API. You can provide your API key in one of two ways:
+You'll need an [OpenAI API key](https://platform.openai.com/docs/api-reference/authentication) to get started. Anecdotally, GPTui is pretty cheap, even with heavy usage, since it's all text and doesn't use any of the multi-modal bells and whistles of the API. You can provide your API key in one of two ways:
 - **As an environment variable:** The program will look for an OPENAI_API_KEY environment variable at runtime by default; you can change the name of this variable in `config.toml` (see below for more on that.)
 - **Provided at compile time:**, If you build with the `comptime-key` feature enabled, the value of OPENAI_API_KEY will be read and compiled into the binary itself. This means you don't have to keep the key in the environment, but if you change your key you'll need to recompile. 
 
@@ -81,13 +81,13 @@ Options:
 
 
 # Roadmap/Wishlist
-[x] External editor support
-[x] Syntax highlighting
-[x] Copy code blocks to clipboard on:
-    [x] Windows 
-    [x] Linux (X11)
-    [ ] Linux (Wayland) (partially working)
-    [ ] MacOS (I can't test this without a Mac, but I think it has a good chance of working already)
-[ ] Document key bindings in the UI itself
-[ ] Replace CLI for selecting a thread with a TUI screen?
+- [x] External editor support
+- [x] Syntax highlighting
+- [x] Copy code blocks to clipboard on:
+    - [x] Windows 
+    - [x] Linux (X11)
+    - [ ] Linux (Wayland) (partially working)
+    - [ ] MacOS (I can't test this without a Mac, but I think it has a good chance of working already)
+- [ ] Document key bindings in the UI itself
+- [ ] Replace CLI for selecting a thread with a TUI screen?
 
