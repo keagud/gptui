@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::editor::input_from_editor;
 use crate::session::string_preview;
 

@@ -1,11 +1,7 @@
-use std::{
-    io::{self, Write},
-    ops::Deref,
-};
+use std::io::{self, Write};
 
 use crate::{
     config::{Prompt, CONFIG},
-    db::DbStore,
     session::Session,
 };
 use anyhow;
@@ -158,8 +154,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
         Commands::Delete { index } => {
             let thread = thread_by_index(&session, *index)
-                .map(|id| session.thread_by_id(id))
-                .flatten()
+                .and_then(|id| session.thread_by_id(id))
                 .expect("Failed to fetch thread");
 
             match prompt_yn!("Delete thread '{}'? (y/N)", thread.display_title()) {
@@ -175,18 +170,17 @@ pub fn run_cli() -> anyhow::Result<()> {
         }
         Commands::Clear => {
             let threads_count = session.ordered_threads().len();
-            match prompt_yn!(
+            if prompt_yn!(
                 "Delete all {} threads? This cannot be undone! (y/N): ",
                 threads_count
-            ) {
-                Some(true) => {
-                    let all_ids = session.threads.keys().copied().collect_vec();
-                    for thread_id in all_ids.into_iter() {
-                        session.delete_thread(thread_id)?;
-                    }
-                    println!("Deleted {} threads", threads_count);
+            )
+            .is_some_and(|x| x)
+            {
+                let all_ids = session.threads.keys().copied().collect_vec();
+                for thread_id in all_ids.into_iter() {
+                    session.delete_thread(thread_id)?;
                 }
-                _ => (),
+                println!("Deleted {} threads", threads_count);
             }
         }
     };

@@ -1,6 +1,6 @@
 [package]
 name = "gptui"
-author = "keagud"
+authors = ["keagud"]
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"
