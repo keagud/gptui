@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     config::{Prompt, CONFIG},
+    db::DbStore,
     session::Session,
 };
 use anyhow;
@@ -36,6 +37,8 @@ enum Commands {
     Delete {
         index: i64,
     },
+
+    Clear,
 }
 
 fn thread_by_index(session: &Session, index: i64) -> Option<Uuid> {
@@ -44,6 +47,37 @@ fn thread_by_index(session: &Session, index: i64) -> Option<Uuid> {
         .get((index - 1) as usize)
         .map(|(id, _)| *id)
         .copied()
+}
+
+macro_rules! prompt_yn {
+
+    ($fmt:literal, $($args:expr),+) => {
+        {
+
+            print!($fmt, $($args),+ );
+            io::stdout().flush()?;
+
+            let mut buf = String::new();
+            io::stdin().read_line(&mut buf)?;
+
+            match buf.to_lowercase().trim_end() {
+                c if c.is_empty() => Some(false),
+                "n" => Some(false),
+                "y" => {
+                    Some(true)
+                }
+                _ => {
+                    None
+                }
+            }
+
+
+
+
+    }
+
+
+    };
 }
 
 pub fn run_cli() -> anyhow::Result<()> {
@@ -125,22 +159,32 @@ pub fn run_cli() -> anyhow::Result<()> {
                 .flatten()
                 .expect("Failed to fetch thread");
 
-            print!("Delete thread '{}'? (y/N)", thread.display_title());
-            io::stdout().flush()?;
-
-            let mut buf = String::new();
-            io::stdin().read_line(&mut buf)?;
-
-            match buf.to_lowercase().trim_end() {
-                c if c.is_empty() => (),
-                "n" => (),
-                "y" => {
+            match prompt_yn!("Delete thread '{}'? (y/N)", thread.display_title()) {
+                Some(false) => (),
+                Some(true) => {
                     session.delete_thread(thread.id)?;
                     println!("Deleted successfully")
                 }
-                _ => {
+                None => {
                     println!("Must be 'y' or 'n'");
                 }
+            }
+        }
+        Commands::Clear => {
+
+            let threads_count = session.ordered_threads().len();
+            match prompt_yn!(
+                "Delete all {} threads? This cannot be undone! (y/N): ",
+                threads_count
+            ) {
+                Some(true) => {
+                    let all_ids = session.threads.keys().copied().collect_vec();
+                    for thread_id in all_ids.into_iter() {
+                        session.delete_thread(thread_id)?;
+                    }
+                    println!("Deleted {} threads", threads_count);
+                }
+                _ => (),
             }
         }
     };
