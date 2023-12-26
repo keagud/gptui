@@ -25,19 +25,22 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// List all saved threads
     List,
+
+    /// Start a new conversation thread
     New {
         #[arg(short, long, help = "Prompt to use")]
         prompt: Option<String>,
     },
-    Resume {
-        index: i64,
-    },
 
-    Delete {
-        index: i64,
-    },
+    /// Resume a previous conversation
+    Resume { index: i64 },
 
+    /// Delete a conversation thread permanently
+    Delete { index: i64 },
+
+    /// Delete all conversation threads
     Clear,
 }
 
@@ -171,7 +174,6 @@ pub fn run_cli() -> anyhow::Result<()> {
             }
         }
         Commands::Clear => {
-
             let threads_count = session.ordered_threads().len();
             match prompt_yn!(
                 "Delete all {} threads? This cannot be undone! (y/N): ",

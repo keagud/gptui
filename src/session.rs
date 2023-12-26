@@ -74,7 +74,8 @@ impl Thread {
     }
 
     pub fn display_title(&self) -> String {
-        let title = self.thread_title()
+        let title = self
+            .thread_title()
             .or_else(|| self.first_message().map(|m| m.content.as_str()))
             .unwrap_or("...");
 
