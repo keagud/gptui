@@ -1,7 +1,14 @@
 [package]
 name = "gptui"
+author = "keagud"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+description = "A TUI interface for OpenAI Chat Completions"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/keagud/gptui"
+keywords = ["openai", "gpt", "llm", "chatbot"]
+categories = ["command-line-utilities"]
 
 [features]
 # compile API key into the binary itself
