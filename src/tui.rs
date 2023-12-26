@@ -140,11 +140,13 @@ impl App {
     }
 
     fn max_scroll(&self) -> usize {
-        if (self.chat_window_height as usize) > self.text_len {
+        if (self.chat_window_height as usize) >= self.text_len {
             0usize
         } else {
             self.text_len
                 .saturating_sub(self.chat_window_height as usize)
+                + 2
+
         }
     }
 
