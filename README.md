@@ -5,7 +5,7 @@
 ## Why does this exist?
 I prefer the question-and-answer style of interaction with LLMS for programming assistance (as opposed to something like Copilot's autocomplete), and I wanted to make an interface designed with that in mind, that could also slot into my existing CLI/TUI based workflow. If you're a fellow vim/tmux/alacritty enjoyer, consider giving it a shot!
 
-## Features:
+## Features
 - Token streaming for that cool ChatGPT vibe
 - Optionally provide your API key at compile time, so you don't need to futz with environment variables later
 - Configure custom prompts and other settings in a TOML config file
