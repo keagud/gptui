@@ -1,4 +1,7 @@
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    ops::Deref,
+};
 
 use crate::{
     config::{Prompt, CONFIG},
@@ -7,6 +10,7 @@ use crate::{
 use anyhow;
 use anyhow::format_err;
 use clap::{Parser, Subcommand};
+use itertools::Itertools;
 use uuid::Uuid;
 
 use crate::tui::App;
@@ -70,10 +74,42 @@ pub fn run_cli() -> anyhow::Result<()> {
         }
         Commands::New { prompt } => {
             let prompt = match prompt {
-                Some(prompt_label) => CONFIG
-                    .get_prompt(prompt_label)
-                    .ok_or_else(|| format_err!("No prompt found with label '{prompt_label}'"))?
-                    .to_owned(),
+                Some(prompt_label) => {
+                    let matching_prompts = CONFIG.get_matching_prompts(prompt_label);
+                    if let Some(prompt) = matching_prompts.first() {
+                        if matching_prompts.len() == 1 {
+                            prompt.to_owned().clone()
+                        } else {
+                            let err_text = [format!(
+                                "Ambiguous specifier for prompt, '{}' could refer to:",
+                                prompt_label
+                            )]
+                            .into_iter()
+                            .chain(
+                                matching_prompts
+                                    .into_iter()
+                                    .map(|p| format!("\t {}", p.label())),
+                            )
+                            .join("\n");
+
+                            return Err(format_err!(err_text));
+                        }
+                    } else {
+                        let all_prompts = CONFIG
+                            .prompts()
+                            .into_iter()
+                            .map(|p| format!("\t{}", p.label()))
+                            .sorted()
+                            .join("\n");
+
+                        return Err(format_err!(
+                            "No prompt matched '{}'. Available prompts are:\n{}",
+                            prompt_label,
+                            &all_prompts
+                        ));
+                    }
+                }
+
                 None => Prompt::default(),
             };
 

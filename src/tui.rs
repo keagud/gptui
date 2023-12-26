@@ -146,7 +146,6 @@ impl App {
             self.text_len
                 .saturating_sub(self.chat_window_height as usize)
                 + 2
-
         }
     }
 
@@ -386,7 +385,7 @@ impl App {
             Style::new().blue()
         };
 
-        let chat_title = self.thread()?.thread_title().unwrap_or("...");
+        let chat_title = self.thread()?.display_title();
 
         let chat_window = Paragraph::new(msgs_text)
             .block(
@@ -394,7 +393,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(border_type)
                     .border_style(Style::default().fg(border_color))
-                    .title(string_preview(chat_title, self.content_line_width.into()).to_string())
+                    .title(string_preview(&chat_title, self.content_line_width.into()).to_string())
                     .padding(ratatui::widgets::Padding {
                         left: h_padding,
                         right: h_padding,

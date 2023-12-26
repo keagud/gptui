@@ -117,6 +117,17 @@ impl Config {
             .find(|p| p.label.to_lowercase() == label.to_lowercase())
     }
 
+    pub fn get_matching_prompts(&self, label: &str) -> Vec<&Prompt> {
+        self.prompts()
+            .into_iter()
+            .filter(|p| {
+                p.label
+                    .to_lowercase()
+                    .starts_with(label.to_lowercase().as_str())
+            })
+            .collect()
+    }
+
     pub fn data_dir(&self) -> &'static PathBuf {
         &DATA_DIR
     }
@@ -149,7 +160,6 @@ impl Config {
             let loaded_config_str = fs::read_to_string(Self::path())?;
             toml::from_str(&loaded_config_str)?
         };
-
 
         // panics if api key is not present
         let _ = loaded_config.api_key();
