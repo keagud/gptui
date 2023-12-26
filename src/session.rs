@@ -73,6 +73,14 @@ impl Thread {
         self.thread_title.as_ref().map(|s| s.as_ref())
     }
 
+    pub fn display_title(&self) -> String {
+        let title = self.thread_title()
+            .or_else(|| self.first_message().map(|m| m.content.as_str()))
+            .unwrap_or("...");
+
+        string_preview(title, 100).to_string()
+    }
+
     pub fn set_title(&mut self, title: &str) {
         self.thread_title = Some(title.into())
     }
@@ -425,6 +433,15 @@ impl Session {
         self.threads = loaded_threads;
 
         Ok(())
+    }
+
+    pub fn delete_thread(&mut self, thread_id: Uuid) -> anyhow::Result<bool> {
+        if let Some(thread) = self.threads.remove(&thread_id) {
+            thread.drop_from_db(&mut self.db)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Create a new thread with the given prompt.

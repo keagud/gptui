@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use crate::{
     config::{Prompt, CONFIG},
     session::Session,
@@ -5,6 +7,7 @@ use crate::{
 use anyhow;
 use anyhow::format_err;
 use clap::{Parser, Subcommand};
+use uuid::Uuid;
 
 use crate::tui::App;
 
@@ -25,6 +28,18 @@ enum Commands {
     Resume {
         index: i64,
     },
+
+    Delete {
+        index: i64,
+    },
+}
+
+fn thread_by_index(session: &Session, index: i64) -> Option<Uuid> {
+    session
+        .ordered_threads()
+        .get((index - 1) as usize)
+        .map(|(id, _)| *id)
+        .copied()
 }
 
 pub fn run_cli() -> anyhow::Result<()> {
@@ -49,13 +64,7 @@ pub fn run_cli() -> anyhow::Result<()> {
         }
 
         Commands::Resume { index } => {
-            let thread_id = session
-                .ordered_threads()
-                .get((index - 1) as usize)
-                .map(|(id, _)| id.to_owned())
-                .expect("Failed to fetch thread")
-                .to_owned();
-
+            let thread_id = thread_by_index(&session, *index).expect("Failed to fetch thread");
             let mut app = App::with_thread(session, thread_id)?;
             app.run()?;
         }
@@ -72,6 +81,31 @@ pub fn run_cli() -> anyhow::Result<()> {
 
             let mut app = App::with_thread(session, new_thread_id)?;
             app.run()?;
+        }
+
+        Commands::Delete { index } => {
+            let thread = thread_by_index(&session, *index)
+                .map(|id| session.thread_by_id(id))
+                .flatten()
+                .expect("Failed to fetch thread");
+
+            print!("Delete thread '{}'? (y/N)", thread.display_title());
+            io::stdout().flush()?;
+
+            let mut buf = String::new();
+            io::stdin().read_line(&mut buf)?;
+
+            match buf.to_lowercase().trim_end() {
+                c if c.is_empty() => (),
+                "n" => (),
+                "y" => {
+                    session.delete_thread(thread.id)?;
+                    println!("Deleted successfully")
+                }
+                _ => {
+                    println!("Must be 'y' or 'n'");
+                }
+            }
         }
     };
 

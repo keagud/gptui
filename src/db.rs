@@ -49,6 +49,7 @@ pub trait DbStore: Sized {
     fn from_db(conn: &Connection, id: Uuid) -> anyhow::Result<Self>;
     fn to_db(&self, conn: &mut Connection) -> anyhow::Result<()>;
     fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>>;
+    fn drop_from_db(&self, conn: &mut Connection) -> anyhow::Result<bool>;
 }
 
 impl DbStore for Thread {
@@ -150,6 +151,23 @@ impl DbStore for Thread {
         }
 
         Ok(new_thread)
+    }
+
+    fn drop_from_db(&self, conn: &mut Connection) -> anyhow::Result<bool> {
+        // clear associated messages
+        conn.prepare("DELETE FROM message WHERE thread_id = ?1")?
+            .execute(params![&self.str_id()])?;
+
+        //clear stored title if it exists
+        conn.prepare("DELETE FROM title WHERE id = ?1")?
+            .execute(params![&self.str_id()])?;
+
+        // delete the thread itself
+        let altered_rows_count = conn
+            .prepare("DELETE FROM thread WHERE id = ?1")?
+            .execute(params![&self.str_id()])?;
+
+        Ok(altered_rows_count > 0)
     }
 
     fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>> {
