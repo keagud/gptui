@@ -1,30 +1,30 @@
 use crate::editor::input_from_editor;
 use crate::session::string_preview;
-
 use crossbeam_channel::Receiver;
-
+use ctrlc::set_handler;
 use itertools::Itertools;
-
 use ratatui::{
     prelude::{Alignment, Constraint, CrosstermBackend, Direction, Layout},
     style::{Color, Style, Stylize},
-    text::Text,
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    text::{Span, Text},
+    widgets::{
+        block::{Position, Title},
+        Block, BorderType, Borders, Paragraph, Wrap,
+    },
     Frame,
 };
 
-use uuid::Uuid;
-
 use crossterm::{
     event::{
-        self,
+        self, DisableMouseCapture, EnableMouseCapture,
         Event::{self},
         KeyCode::{self},
-        KeyEvent, KeyModifiers,
+        KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use uuid::Uuid;
 
 use crate::clip;
 use crate::session::{stream_thread_reply, Message, Session, Thread};
@@ -128,11 +128,14 @@ impl App {
     pub fn startup() -> anyhow::Result<()> {
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen)?;
+        execute!(std::io::stderr(), EnableMouseCapture)?;
         Ok(())
     }
 
     pub fn shutdown() -> anyhow::Result<()> {
+        execute!(std::io::stderr(), DisableMouseCapture)?;
         execute!(std::io::stderr(), LeaveAlternateScreen)?;
+
         disable_raw_mode()?;
         Ok(())
     }
@@ -219,7 +222,21 @@ impl App {
         Ok(())
     }
 
+    fn scroll_up(&mut self, step: usize) {
+        self.chat_scroll = self.chat_scroll.saturating_sub(step);
+    }
+
+    fn scroll_down(&mut self, step: usize) {
+        self.chat_scroll = self
+            .chat_scroll
+            .saturating_add(step)
+            .clamp(0, self.max_scroll());
+    }
+
     fn update_awaiting_send(&mut self) -> anyhow::Result<()> {
+        let input_event = crossterm::event::read()?;
+
+        // key event handling
         if let Event::Key(
             key_event @ KeyEvent {
                 kind: event::KeyEventKind::Press,
@@ -227,7 +244,7 @@ impl App {
                 modifiers: key_modifiers,
                 ..
             },
-        ) = crossterm::event::read()?
+        ) = input_event
         {
             match key_code {
                 // ctrl-c to quit
@@ -236,17 +253,10 @@ impl App {
                 }
 
                 //scroll history up
-                KeyCode::Up => {
-                    self.chat_scroll = self.chat_scroll.saturating_sub(SCROLL_STEP);
-                }
+                KeyCode::Up => self.scroll_up(SCROLL_STEP),
 
                 // scroll history down
-                KeyCode::Down => {
-                    self.chat_scroll = self
-                        .chat_scroll
-                        .saturating_add(SCROLL_STEP)
-                        .clamp(0, self.max_scroll());
-                }
+                KeyCode::Down => self.scroll_down(SCROLL_STEP),
 
                 // if already in copy mode, forward event to its handler
                 _ if self.copy_mode => self.update_copy_mode(key_event)?,
@@ -291,6 +301,21 @@ impl App {
                 KeyCode::Backspace => {
                     self.user_message.pop();
                 }
+
+                _ => (),
+            }
+            // non-keyboard events
+        } else {
+            match input_event {
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::ScrollUp,
+                    ..
+                }) => self.scroll_up(SCROLL_STEP * 2),
+
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::ScrollDown,
+                    ..
+                }) => self.scroll_down(SCROLL_STEP * 2),
 
                 _ => (),
             }
@@ -380,27 +405,45 @@ impl App {
             Style::new().blue()
         };
 
+        let scroll_percent = (self.chat_scroll as f64 / self.max_scroll() as f64) * 100.0;
+
         let chat_title = self.thread()?.display_title();
 
-        let chat_window = Paragraph::new(msgs_text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(border_type)
-                .border_style(Style::default().fg(border_color))
-                .title(string_preview(&chat_title, self.content_line_width.into()).to_string())
-                .padding(ratatui::widgets::Padding {
-                    left: h_padding,
-                    right: h_padding,
-                    ..Default::default()
-                }),
-        );
+        let status_message: Title<'_> = if self.is_recieving() {
+            Span::from("[Please Wait]").red().bold().into()
+        } else {
+            Span::from("[Ready!]").green().into()
+        };
+
+        let chat_window_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(border_type)
+            .border_style(Style::default().fg(border_color))
+            .title(string_preview(&chat_title, self.content_line_width.into()).to_string())
+            .title(
+                Title::from(format!("{:02.0}%", scroll_percent))
+                    .alignment(Alignment::Right)
+                    .position(Position::Bottom),
+            )
+            .padding(ratatui::widgets::Padding {
+                left: h_padding,
+                right: h_padding,
+                ..Default::default()
+            });
+
+        let chat_window = Paragraph::new(msgs_text).block(chat_window_block);
 
         frame.render_widget(chat_window, chunks[0]);
 
         let mut input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(box_color)
-            .border_type(ratatui::widgets::BorderType::Rounded);
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .title(
+                status_message
+                    .position(Position::Bottom)
+                    .alignment(Alignment::Left),
+            );
 
         let alert_msg = self
             .bottom_text
@@ -438,9 +481,9 @@ impl App {
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
-        // set_handler(|| {
-        //     App::shutdown().expect("Cleanup procedure failed");
-        // })?;
+        set_handler(|| {
+            App::shutdown().expect("Cleanup procedure failed");
+        })?;
 
         App::startup()?;
 
