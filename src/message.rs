@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, StyledGrapheme, Text};
 use serde::{Deserialize, Serialize};
+use textwrap::wrap;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
@@ -188,7 +189,7 @@ impl Message {
         let mut formatted_lines: Vec<Line> = Vec::new();
         let mut block_index = 0usize;
 
-        for msg_line in self.non_code_content.lines() {
+        for msg_line in wrap(&self.non_code_content, line_width as usize) {
             if msg_line.trim() == BLOCK_MARKER {
                 if let Some(block) = self.code_blocks.get(block_index) {
                     formatted_lines
@@ -197,7 +198,7 @@ impl Message {
                     *index += 1;
                 }
             } else {
-                formatted_lines.push(msg_line.into());
+                formatted_lines.push(msg_line.to_string().into());
             }
         }
 

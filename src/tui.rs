@@ -179,7 +179,6 @@ impl App {
                             clip::copy(&block.content)?;
                             self.bottom_text =
                                 Some(format!("Copied '{}'", string_preview(&block.content, 30)));
-                            // TODO extract this cleanup logic to a function
                             self.exit_copy_mode();
                         }
                     }
@@ -367,8 +366,6 @@ impl App {
 
         let text_len = msg_lines.len();
 
-        let _window_height = chunks[0].height;
-
         let msgs_text = self.visible_text(msg_lines);
 
         let (border_color, border_type) = if self.copy_mode {
@@ -385,20 +382,18 @@ impl App {
 
         let chat_title = self.thread()?.display_title();
 
-        let chat_window = Paragraph::new(msgs_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(border_type)
-                    .border_style(Style::default().fg(border_color))
-                    .title(string_preview(&chat_title, self.content_line_width.into()).to_string())
-                    .padding(ratatui::widgets::Padding {
-                        left: h_padding,
-                        right: h_padding,
-                        ..Default::default()
-                    }),
-            )
-            .wrap(Wrap { trim: false });
+        let chat_window = Paragraph::new(msgs_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(border_type)
+                .border_style(Style::default().fg(border_color))
+                .title(string_preview(&chat_title, self.content_line_width.into()).to_string())
+                .padding(ratatui::widgets::Padding {
+                    left: h_padding,
+                    right: h_padding,
+                    ..Default::default()
+                }),
+        );
 
         frame.render_widget(chat_window, chunks[0]);
 
