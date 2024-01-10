@@ -207,7 +207,7 @@ impl Thread {
     }
 
     /// Commit the completed message to the thread, and reset state for the next incoming message
-    pub fn commit_message(&mut self) -> anyhow::Result<()> {
+    pub fn commit_message(&mut self) -> SessionResult<()> {
         if let Some(msg) = self.incoming.take() {
             self.messages.push(msg);
 
@@ -548,11 +548,12 @@ impl Drop for Session {
     }
 }
 
-pub fn stream_thread_reply(thread: &Thread) -> anyhow::Result<Receiver<Option<String>>> {
+pub fn stream_thread_reply(thread: &Thread) -> SessionResult<Receiver<Option<String>>> {
     if !thread.last_message().map(|m| m.is_user()).unwrap_or(false) {
         return Err(anyhow::format_err!(
             "The most recent messege in the thread must be from a user"
-        ));
+        )
+        .into());
     }
 
     let client = create_client::<AsyncClient>()?;

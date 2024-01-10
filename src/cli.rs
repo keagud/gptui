@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use crate::{
     config::{Prompt, CONFIG},
     session::Session,
+    tui::{AppError, AppResult},
 };
 use anyhow;
 use anyhow::format_err;
@@ -79,7 +80,11 @@ macro_rules! prompt_yn {
     };
 }
 
-pub fn run_cli() -> anyhow::Result<()> {
+fn invalid_cli_value(msg: &str) -> clap::Error {
+    clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+}
+
+pub fn run_cli() -> AppResult<()> {
     let cli = Cli::parse();
     let mut session = Session::new()?;
     session.load_threads()?;
@@ -97,7 +102,9 @@ pub fn run_cli() -> anyhow::Result<()> {
         }
 
         Commands::Resume { index } if (*index < 1 || *index > session.nonempty_count() as i64) => {
-            return Err(format_err!("Invalid index {index}"))
+            let cli_err = clap::error::Error::raw(clap::error::ErrorKind::InvalidValue, "");
+
+            return Err(cli_err.into());
         }
 
         Commands::Resume { index } => {
@@ -125,7 +132,7 @@ pub fn run_cli() -> anyhow::Result<()> {
                             )
                             .join("\n");
 
-                            return Err(format_err!(err_text));
+                            return Err(invalid_cli_value(&err_text).into());
                         }
                     } else {
                         let all_prompts = CONFIG
@@ -135,11 +142,11 @@ pub fn run_cli() -> anyhow::Result<()> {
                             .sorted()
                             .join("\n");
 
-                        return Err(format_err!(
+                        return Err(invalid_cli_value(&format!(
                             "No prompt matched '{}'. Available prompts are:\n{}",
-                            prompt_label,
-                            &all_prompts
-                        ));
+                            prompt_label, &all_prompts
+                        ))
+                        .into());
                     }
                 }
 

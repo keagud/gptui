@@ -1,7 +1,8 @@
 use gptui::cli::run_cli;
 use gptui::session::Session;
+use gptui::tui::{AppResult, AppError};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> AppResult<()> {
     #[cfg(debug_assertions)]
     {
         if let Some(arg) = std::env::args_os()

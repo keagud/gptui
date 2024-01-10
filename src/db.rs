@@ -1,5 +1,4 @@
 use crate::config::CONFIG;
-use crate::errors::SessionResult;
 use crate::session::{Message, Role, Thread};
 
 use rusqlite::OptionalExtension;

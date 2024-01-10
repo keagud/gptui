@@ -13,7 +13,7 @@ use syntect::parsing::SyntaxReference;
 
 use itertools::Itertools;
 
-use crate::errors::{SessionError, SessionResult};
+use crate::session::SessionResult;
 
 lazy_static::lazy_static! {
 

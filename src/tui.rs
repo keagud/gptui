@@ -1,5 +1,6 @@
-use crate::editor::input_from_editor;
-use crate::session::string_preview;
+use crate::editor::{input_from_editor, ExternEditorError};
+use crate::session::{string_preview, SessionError};
+
 use crossbeam_channel::Receiver;
 use ctrlc::set_handler;
 use itertools::Itertools;
@@ -28,6 +29,32 @@ use uuid::Uuid;
 
 use crate::clip;
 use crate::session::{stream_thread_reply, Message, Session, Thread};
+
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error(transparent)]
+    SessionError(#[from] SessionError),
+
+    #[error(transparent)]
+    ChannelError(#[from] crossbeam_channel::RecvError),
+
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+
+    #[error(transparent)]
+    ClipboardError(#[from] arboard::Error),
+
+    #[error(transparent)]
+    CliError(#[from] clap::Error),
+
+    #[error(transparent)]
+    EditorError(#[from] ExternEditorError),
+
+    #[error("An error occured: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Sync + Send>),
+}
+
+pub type AppResult<T> = Result<T, AppError>;
 
 type ReplyRx = Receiver<Option<String>>;
 
@@ -106,18 +133,20 @@ macro_rules! app_defaults {
 
 macro_rules! thread_missing {
     ($opt:expr) => {
-        $opt.ok_or_else(|| anyhow::format_err!("Not connected to a thread"))
+        $opt.ok_or_else(|| {
+            SessionError::Other(anyhow::format_err!("Not connected to a thread").into()).into()
+        })
     };
 }
 
 impl App {
-    fn thread(&self) -> anyhow::Result<&Thread> {
+    fn thread(&self) -> AppResult<&Thread> {
         thread_missing! {
         self.thread_id.and_then(|id| self.session.thread_by_id(id))
         }
     }
 
-    fn thread_mut(&mut self) -> anyhow::Result<&mut Thread> {
+    fn thread_mut(&mut self) -> AppResult<&mut Thread> {
         thread_missing! {
             self
         .thread_id
@@ -125,14 +154,14 @@ impl App {
         }
     }
 
-    pub fn startup() -> anyhow::Result<()> {
+    pub fn startup() -> AppResult<()> {
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen)?;
         execute!(std::io::stderr(), EnableMouseCapture)?;
         Ok(())
     }
 
-    pub fn shutdown() -> anyhow::Result<()> {
+    pub fn shutdown() -> AppResult<()> {
         execute!(std::io::stderr(), DisableMouseCapture)?;
         execute!(std::io::stderr(), LeaveAlternateScreen)?;
 
@@ -168,7 +197,7 @@ impl App {
     }
 
     /// 'minor mode' allowing the user to select code block text by its displayed index
-    fn update_copy_mode(&mut self, key_event: KeyEvent) -> anyhow::Result<()> {
+    fn update_copy_mode(&mut self, key_event: KeyEvent) -> AppResult<()> {
         match key_event.code {
             KeyCode::Esc => self.exit_copy_mode(),
             KeyCode::Enter => {
@@ -233,7 +262,7 @@ impl App {
             .clamp(0, self.max_scroll());
     }
 
-    fn update_awaiting_send(&mut self) -> anyhow::Result<()> {
+    fn update_awaiting_send(&mut self) -> AppResult<()> {
         let input_event = crossterm::event::read()?;
 
         // key event handling
@@ -328,7 +357,7 @@ impl App {
         self.reply_rx.is_some()
     }
 
-    fn update_recieving(&mut self) -> anyhow::Result<()> {
+    fn update_recieving(&mut self) -> AppResult<()> {
         self.chat_scroll = self.max_scroll();
         if let Some(rx) = self.reply_rx.as_ref() {
             {
@@ -347,7 +376,7 @@ impl App {
         Ok(())
     }
 
-    fn update(&mut self) -> anyhow::Result<()> {
+    fn update(&mut self) -> AppResult<()> {
         let has_key_input = crossterm::event::poll(self.tick_duration)?;
 
         match self.reply_rx {
@@ -369,7 +398,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&mut self, frame: &mut Frame) -> anyhow::Result<()> {
+    fn ui(&mut self, frame: &mut Frame) -> AppResult<()> {
         let h_padding = 5u16;
 
         let chunks = Layout::default()
@@ -470,20 +499,21 @@ impl App {
         Ok(())
     }
 
-    pub fn with_thread(session: Session, thread_id: Uuid) -> anyhow::Result<Self> {
+    pub fn with_thread(session: Session, thread_id: Uuid) -> AppResult<Self> {
         app_defaults!(session, thread_id)
     }
 
-    pub fn new(_prompt: &str) -> anyhow::Result<Self> {
+    pub fn new(_prompt: &str) -> AppResult<Self> {
         let session = Session::new()?;
 
         app_defaults!(session)
     }
 
-    pub fn run(&mut self) -> anyhow::Result<()> {
+    pub fn run(&mut self) -> AppResult<()> {
         set_handler(|| {
             App::shutdown().expect("Cleanup procedure failed");
-        })?;
+        })
+        .expect("Failed to set handler");
 
         App::startup()?;
 
@@ -509,7 +539,7 @@ impl App {
         Ok(())
     }
 
-    fn show_editor(&mut self, terminal: &mut CrosstermTerminal) -> anyhow::Result<()> {
+    fn show_editor(&mut self, terminal: &mut CrosstermTerminal) -> AppResult<()> {
         terminal.clear()?;
         terminal.flush()?;
 
