@@ -11,14 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxReference;
 
-#[allow(unused)]
 use itertools::Itertools;
 
-#[allow(unused)]
-use futures::StreamExt;
-
-#[allow(unused)]
-use futures_util::TryStreamExt;
+use crate::errors::{SessionError, SessionResult};
 
 lazy_static::lazy_static! {
 
@@ -87,12 +82,12 @@ impl Role {
         }
     }
 
-    pub fn from_num(num: usize) -> anyhow::Result<Self> {
+    pub fn from_num(num: usize) -> SessionResult<Self> {
         match num {
             1 => Ok(Role::System),
             2 => Ok(Role::User),
             3 => Ok(Role::Assistant),
-            _ => Err(format_err!("Role value must be 1, 2, or 3")),
+            _ => Err(format_err!("Role value must be 1, 2, or 3").into()),
         }
     }
 }

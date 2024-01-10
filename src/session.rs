@@ -1,5 +1,5 @@
 use crate::config::{Prompt, CONFIG};
-use crate::db::{init_db, DbStore};
+use crate::db::{init_db, DbError, DbStore};
 pub use crate::message::{CodeBlock, Message, Role};
 
 use anyhow::format_err;
@@ -25,6 +25,48 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
+
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    #[error(transparent)]
+    DatabaseError(#[from] DbError),
+
+    #[error("HTTP request returned status {status}")]
+    HttpError {
+        base_err: reqwest::Error,
+        status: reqwest::StatusCode,
+        message: String,
+    },
+
+    #[error("Connection error: {base_err}")]
+    ConnectionError { base_err: reqwest::Error },
+
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error + Sync + Send>),
+}
+
+impl From<anyhow::Error> for SessionError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::Other(value.into())
+    }
+}
+
+impl From<reqwest::Error> for SessionError {
+    fn from(value: reqwest::Error) -> Self {
+        if let Some(status) = value.status() {
+            let message = value.to_string();
+            Self::HttpError {
+                base_err: value,
+                status,
+                message,
+            }
+        } else {
+            Self::ConnectionError { base_err: value }
+        }
+    }
+}
+
+pub type SessionResult<T> = Result<T, SessionError>;
 
 // get an initial slice of a string, ending with elipsis,
 //desired_length is the maximum final length including elipsis.
@@ -249,12 +291,12 @@ impl Thread {
         self.messages.iter().last()
     }
 
-    pub fn update_thread_name(&mut self) -> anyhow::Result<()> {
+    pub fn update_thread_name(&mut self) -> SessionResult<()> {
         self.thread_title = Some(self.fetch_thread_name()?);
         Ok(())
     }
 
-    pub fn fetch_thread_name(&self) -> anyhow::Result<String> {
+    pub fn fetch_thread_name(&self) -> SessionResult<String> {
         let client = create_client::<BlockingClient>()?;
 
         let chat_content = self
@@ -320,14 +362,14 @@ macro_rules! build_client {
         Self::builder()
             .default_headers(headers)
             .build()
-            .map_err(|e| anyhow::anyhow!(e))
+            .map_err(|e| e.into())
     }};
 }
 
 macro_rules! impl_client {
     ($struct:ident) => {
         impl HttpClient for $struct {
-            fn init() -> anyhow::Result<Self> {
+            fn init() -> SessionResult<Self> {
                 build_client!()
             }
         }
@@ -335,14 +377,14 @@ macro_rules! impl_client {
 }
 
 trait HttpClient: Sized {
-    fn init() -> anyhow::Result<Self>;
+    fn init() -> SessionResult<Self>;
 }
 
 impl_client!(AsyncClient);
 impl_client!(BlockingClient);
 
 /// Create a reqwest::Client with the correct default authorization headers
-fn create_client<T>() -> anyhow::Result<T>
+fn create_client<T>() -> SessionResult<T>
 where
     T: HttpClient,
 {
@@ -383,7 +425,7 @@ pub struct Session {
     db: rusqlite::Connection,
 }
 
-fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>, Option<String>)> {
+fn try_parse_chunks(input: &str) -> SessionResult<(Option<Vec<CompletionChunk>>, Option<String>)> {
     let mut valid_chunks = Vec::new();
 
     let mut remainder = None;
@@ -404,7 +446,7 @@ fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>
             }
             Err(e) if e.is_syntax() && *line == "[DONE]" => break,
 
-            Err(e) => return Err(anyhow::anyhow!(e)),
+            Err(e) => return Err(anyhow::anyhow!(e).into()),
         }
     }
 
@@ -418,14 +460,14 @@ fn try_parse_chunks(input: &str) -> anyhow::Result<(Option<Vec<CompletionChunk>>
 }
 
 impl Session {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> SessionResult<Self> {
         Ok(Self {
             threads: HashMap::new(),
             db: init_db()?,
         })
     }
 
-    pub fn load_threads(&mut self) -> anyhow::Result<()> {
+    pub fn load_threads(&mut self) -> SessionResult<()> {
         let loaded_threads = Thread::get_all(&mut self.db)?
             .into_iter()
             .map(|t| (t.id, t))
@@ -436,7 +478,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn delete_thread(&mut self, thread_id: Uuid) -> anyhow::Result<bool> {
+    pub fn delete_thread(&mut self, thread_id: Uuid) -> SessionResult<bool> {
         if let Some(thread) = self.threads.remove(&thread_id) {
             thread.drop_from_db(&mut self.db)?;
             Ok(true)
@@ -447,7 +489,7 @@ impl Session {
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
-    pub fn new_thread(&mut self, prompt: &Prompt) -> anyhow::Result<Uuid> {
+    pub fn new_thread(&mut self, prompt: &Prompt) -> SessionResult<Uuid> {
         let messages = vec![Message::new(Role::System, prompt.prompt(), Utc::now())];
 
         let model = "gpt-4";
@@ -457,7 +499,7 @@ impl Session {
         thread.prompt = prompt.clone();
 
         if self.threads.insert(id, thread).is_some() {
-            Err(anyhow::format_err!("Thread ID was already present: {id}"))
+            Err(anyhow::format_err!("Thread ID was already present: {id}").into())
         } else {
             Ok(id)
         }
@@ -491,7 +533,7 @@ impl Session {
             .count()
     }
 
-    pub fn save_to_db(&mut self) -> anyhow::Result<()> {
+    pub fn save_to_db(&mut self) -> SessionResult<()> {
         for thread in self.threads.values() {
             thread.to_db(&mut self.db)?;
         }

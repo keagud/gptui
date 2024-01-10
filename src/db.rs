@@ -1,10 +1,25 @@
 use crate::config::CONFIG;
+use crate::errors::SessionResult;
 use crate::session::{Message, Role, Thread};
 
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection};
 
 use uuid::Uuid;
+
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error(transparent)]
+    SqliteError(#[from] rusqlite::Error),
+
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+
+    #[error("Error attempting to handle database value: {0}")]
+    RetrievalError(#[from] Box<dyn std::error::Error + Sync + Send>),
+}
+
+pub type DbResult<T> = Result<T, DbError>;
 
 const SCHEMA_CMD: &str = r#"
     CREATE TABLE thread(
@@ -46,14 +61,16 @@ pub fn init_db() -> anyhow::Result<Connection> {
 }
 
 pub trait DbStore: Sized {
-    fn from_db(conn: &Connection, id: Uuid) -> anyhow::Result<Self>;
-    fn to_db(&self, conn: &mut Connection) -> anyhow::Result<()>;
-    fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>>;
-    fn drop_from_db(&self, conn: &mut Connection) -> anyhow::Result<bool>;
+    type Error;
+    fn from_db(conn: &Connection, id: Uuid) -> Result<Self, Self::Error>;
+    fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error>;
+    fn get_all(conn: &mut Connection) -> Result<Vec<Self>, Self::Error>;
+    fn drop_from_db(&self, conn: &mut Connection) -> Result<bool, Self::Error>;
 }
 
 impl DbStore for Thread {
-    fn to_db(&self, conn: &mut Connection) -> anyhow::Result<()> {
+    type Error = DbError;
+    fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error> {
         conn.execute(
             "INSERT OR IGNORE INTO thread (id, model) VALUES (?1, ?2)",
             [&self.str_id(), &self.model],
@@ -111,7 +128,7 @@ impl DbStore for Thread {
         Ok(())
     }
 
-    fn from_db(conn: &Connection, id: Uuid) -> anyhow::Result<Self> {
+    fn from_db(conn: &Connection, id: Uuid) -> Result<Self, Self::Error> {
         let id_str = id.as_simple().to_string();
 
         let model: String = conn
@@ -130,14 +147,19 @@ impl DbStore for Thread {
         )?;
 
         let messages: Vec<Message> = stmt
-            .query_and_then([&id_str], |row| -> anyhow::Result<Message> {
+            .query_and_then([&id_str], |row| -> rusqlite::Result<Message> {
                 Ok(Message::new_from_db(
-                    Role::from_num(row.get::<usize, i64>(0)?.try_into()?)?,
+                    Role::from_num(
+                        row.get::<usize, i64>(0)?
+                            .try_into()
+                            .map_err(|e| rusqlite::Error::InvalidColumnIndex(0))?,
+                    )
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?,
                     row.get(1)?,
                     row.get(2)?,
                 ))
             })?
-            .collect::<anyhow::Result<Vec<Message>>>()?;
+            .collect::<Result<Vec<Message>, _>>()?;
 
         let title = conn
             .prepare("SELECT content FROM title WHERE id = ?1")?
@@ -153,7 +175,7 @@ impl DbStore for Thread {
         Ok(new_thread)
     }
 
-    fn drop_from_db(&self, conn: &mut Connection) -> anyhow::Result<bool> {
+    fn drop_from_db(&self, conn: &mut Connection) -> Result<bool, Self::Error> {
         // clear associated messages
         conn.prepare("DELETE FROM message WHERE thread_id = ?1")?
             .execute(params![&self.str_id()])?;
@@ -170,14 +192,19 @@ impl DbStore for Thread {
         Ok(altered_rows_count > 0)
     }
 
-    fn get_all(conn: &mut Connection) -> anyhow::Result<Vec<Self>> {
+    fn get_all(conn: &mut Connection) -> Result<Vec<Self>, Self::Error> {
         let ids: Vec<String> = conn
             .prepare("SELECT id FROM thread")?
             .query_and_then([], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?;
 
         ids.into_iter()
-            .map(|id| Self::from_db(conn, Uuid::parse_str(&id)?))
+            .map(|id| {
+                Self::from_db(
+                    conn,
+                    Uuid::parse_str(&id).map_err(|e| DbError::RetrievalError(e.into()))?,
+                )
+            })
             .collect()
     }
 }
