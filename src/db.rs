@@ -1,4 +1,5 @@
 use crate::config::CONFIG;
+use crate::llm::LlmModel;
 use crate::session::{Message, Role, Thread};
 
 use rusqlite::OptionalExtension;
@@ -72,7 +73,7 @@ impl DbStore for Thread {
     fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error> {
         conn.execute(
             "INSERT OR IGNORE INTO thread (id, model) VALUES (?1, ?2)",
-            [&self.str_id(), &self.model],
+            [&self.str_id(), &self.model.to_string()],
         )?;
 
         if let Some(title) = self.thread_title() {
@@ -130,9 +131,15 @@ impl DbStore for Thread {
     fn from_db(conn: &Connection, id: Uuid) -> Result<Self, Self::Error> {
         let id_str = id.as_simple().to_string();
 
-        let model: String = conn
+        let model_label: String = conn
             .prepare(r" SELECT model FROM thread WHERE id = ?1 ")?
             .query_row([&id_str], |row| row.get(0))?;
+
+        let model = LlmModel::from_label(&model_label).ok_or_else(|| {
+            DbError::RetrievalError(
+                anyhow::format_err!("{} is not a valid model", &model_label).into(),
+            )
+        })?;
 
         let mut stmt = conn.prepare(
             r#"
@@ -165,7 +172,7 @@ impl DbStore for Thread {
             .query_row([&id_str], |row| row.get::<_, String>(0))
             .optional()?;
 
-        let mut new_thread = Thread::new(messages, &model, id);
+        let mut new_thread = Thread::new(messages, model, id);
 
         if let Some(ref title) = title {
             new_thread.set_title(title);

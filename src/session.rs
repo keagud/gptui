@@ -1,5 +1,6 @@
-use crate::config::{Prompt, CONFIG};
+use crate::config::{PromptSetting, CONFIG};
 use crate::db::{init_db, DbError, DbStore};
+use crate::llm::LlmModel;
 pub use crate::message::{CodeBlock, Message, Role};
 
 use anyhow::format_err;
@@ -86,29 +87,25 @@ pub fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
             .join(""),
     )
 }
-#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Thread {
     messages: Vec<Message>,
-    pub model: String,
+    pub model: LlmModel,
 
-    #[serde(skip)]
     pub id: Uuid,
 
-    #[serde(skip)]
-    prompt: Prompt,
+    prompt: PromptSetting,
 
-    #[serde(skip)]
     incoming: Option<Message>,
 
-    #[serde(skip)]
     thread_title: Option<String>,
 }
 
 impl Thread {
-    pub fn new(messages: Vec<Message>, model: &str, id: Uuid) -> Self {
+    pub fn new(messages: Vec<Message>, model: LlmModel, id: Uuid) -> Self {
         Self {
             messages,
-            model: model.into(),
+            model,
             id,
             ..Default::default()
         }
@@ -186,7 +183,7 @@ impl Thread {
         self.messages.iter().collect()
     }
     /// Get the prompt used to begin this thread
-    pub fn prompt(&self) -> &Prompt {
+    pub fn prompt(&self) -> &PromptSetting {
         &self.prompt
     }
 
@@ -264,7 +261,7 @@ impl Thread {
     /// Format this thread as JSON suitible for use with the HTTP API
     pub fn as_json_body(&self) -> Value {
         json!({
-            "model" : self.model,
+            "model" : self.model.to_string(),
             "messages" : self.messages
                 .iter()
                 .map(|m| serde_json::to_value(m).unwrap())
@@ -492,13 +489,12 @@ impl Session {
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
-    pub fn new_thread(&mut self, prompt: &Prompt) -> SessionResult<Uuid> {
+    pub fn new_thread(&mut self, prompt: &PromptSetting) -> SessionResult<Uuid> {
         let messages = vec![Message::new(Role::System, prompt.prompt(), Utc::now())];
 
-        let model = "gpt-4";
         let id = Uuid::new_v4();
 
-        let mut thread = Thread::new(messages, model, id);
+        let mut thread = Thread::new(messages, prompt.model(), id);
         thread.prompt = prompt.clone();
 
         if self.threads.insert(id, thread).is_some() {

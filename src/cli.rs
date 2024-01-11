@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use crate::{
-    config::{Prompt, CONFIG},
+    config::{PromptSetting, CONFIG},
     session::Session,
     tui::{AppError, AppResult},
 };
@@ -27,7 +27,7 @@ enum Commands {
 
     /// Start a new conversation thread
     New {
-        #[arg(short, long, help = "Prompt to use")]
+        #[arg(short, long, help = "PromptSetting to use")]
         prompt: Option<String>,
     },
 
@@ -150,7 +150,7 @@ pub fn run_cli() -> AppResult<()> {
                     }
                 }
 
-                None => Prompt::default(),
+                None => PromptSetting::default(),
             };
 
             let new_thread_id = session.new_thread(&prompt)?;

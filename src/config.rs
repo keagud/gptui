@@ -5,6 +5,8 @@ use std::{collections::HashSet, fs, path::PathBuf};
 
 use toml;
 
+use crate::llm::LlmModel;
+
 lazy_static::lazy_static! {
     static ref PROJECT_DIRS: directories::ProjectDirs =
     ProjectDirs::from("", "", env!("CARGO_PKG_NAME"))
@@ -61,13 +63,14 @@ mod default_config {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Eq, PartialEq)]
-pub struct Prompt {
+pub struct PromptSetting {
     label: String,
     prompt: String,
+    model: LlmModel,
     color: Option<String>,
 }
 
-impl Prompt {
+impl PromptSetting {
     pub fn label(&self) -> &str {
         self.label.as_str()
     }
@@ -79,14 +82,19 @@ impl Prompt {
     pub fn color(&self) -> Option<&str> {
         self.color.as_deref()
     }
+
+    pub fn model(&self) -> LlmModel {
+        self.model
+   }
 }
 
-impl Default for Prompt {
+impl Default for PromptSetting {
     fn default() -> Self {
         Self {
             label: "Assistant".into(),
             prompt: "You are a helpful assistant".into(),
             color: None,
+            model: LlmModel::default(),
         }
     }
 }
@@ -96,7 +104,7 @@ pub struct Config {
     syntax_theme: String,
     editor: Option<String>,
     api_key_var: Option<String>,
-    prompts: HashSet<Prompt>,
+    prompts: HashSet<PromptSetting>,
 }
 
 impl Default for Config {
@@ -107,17 +115,17 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn prompts(&self) -> Vec<&Prompt> {
+    pub fn prompts(&self) -> Vec<&PromptSetting> {
         self.prompts.iter().collect()
     }
 
-    pub fn get_prompt(&self, label: &str) -> Option<&Prompt> {
+    pub fn get_prompt(&self, label: &str) -> Option<&PromptSetting> {
         self.prompts
             .iter()
             .find(|p| p.label.to_lowercase() == label.to_lowercase())
     }
 
-    pub fn get_matching_prompts(&self, label: &str) -> Vec<&Prompt> {
+    pub fn get_matching_prompts(&self, label: &str) -> Vec<&PromptSetting> {
         self.prompts()
             .into_iter()
             .filter(|p| {
@@ -166,7 +174,7 @@ impl Config {
 
         // confirm any user-set colors are valid
         if let Some(
-            bad_prompt @ Prompt {
+            bad_prompt @ PromptSetting {
                 color: Some(bad_color),
                 ..
             },

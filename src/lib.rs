@@ -5,4 +5,5 @@ pub mod db;
 pub mod editor;
 pub mod message;
 pub mod session;
+pub mod llm;
 pub mod tui;
