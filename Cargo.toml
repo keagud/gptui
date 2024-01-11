@@ -13,6 +13,7 @@ categories = ["command-line-utilities"]
 [features]
 # compile API key into the binary itself
 comptime-key = []
+debug-dump = []
 
 [dependencies]
 ansi-to-tui = "3.1.0"
@@ -25,6 +26,7 @@ crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 ctrlc = { version = "3.4.2", features = ["termination"] }
 directories = "5.0.1"
 edit = "0.1.4"
+filenamify = "0.1.0"
 futures = "0.3.29"
 futures-util = "0.3.29"
 itertools = "0.12.0"

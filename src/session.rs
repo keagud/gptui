@@ -6,6 +6,7 @@ use anyhow::format_err;
 use chrono::{DateTime, Utc};
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
+use filenamify::filenamify;
 use futures::StreamExt;
 use futures_util::TryStreamExt;
 use itertools::Itertools;
@@ -21,6 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, json, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::prelude::*;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -542,6 +545,15 @@ impl Session {
     }
 }
 
+#[cfg(feature = "debug-dump")]
+impl Session {
+    pub fn dump_all(&self) {
+        for (_, thread) in self.ordered_threads() {
+            thread.dump()
+        }
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         self.save_to_db().unwrap();
@@ -610,6 +622,50 @@ pub fn stream_thread_reply(thread: &Thread) -> SessionResult<Receiver<Option<Str
 
     Ok(rx)
 }
+
+#[cfg(feature = "debug-dump")]
+impl Thread {
+    pub fn dump_to_file(&self, dest: impl AsRef<Path>) {
+        let json = self.as_json_body();
+        let dest_file = PathBuf::from(dest.as_ref());
+
+        let json_content = serde_json::to_string_pretty(&json).expect("Failed to write to json");
+        std::fs::write(dest_file, json_content.as_bytes()).unwrap();
+    }
+
+    pub fn dump_location(&self) -> PathBuf {
+        #[cfg(debug_assertions)]
+        let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_assets");
+
+        #[cfg(not(debug_assertions))]
+        let p = std::env::current_dir().expect("Could not get current working dir");
+
+        if !p.exists() {
+            std::fs::create_dir_all(&p).expect("Could not create directory");
+        }
+
+        let title = self.thread_title().unwrap_or("").to_string();
+
+        let display_time = if let Some(t) = self.init_time() {
+            t.to_string()
+        } else {
+            String::new()
+        };
+
+        let file_title = filenamify([display_time, title].join("_"));
+
+        let out_file = p.join(&file_title).with_extension("json");
+
+        dbg!(&out_file);
+
+        out_file
+    }
+
+    pub fn dump(&self) {
+        self.dump_to_file(&self.dump_location())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

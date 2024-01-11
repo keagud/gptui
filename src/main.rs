@@ -1,8 +1,17 @@
 use gptui::cli::run_cli;
 use gptui::session::Session;
-use gptui::tui::{AppResult, AppError};
+use gptui::tui::{AppError, AppResult};
 
 fn main() -> AppResult<()> {
+    #[cfg(feature = "debug-dump")]
+    {
+        let mut session = Session::new()?;
+        session.load_threads()?;
+        session.dump_all();
+        println!("Dumped session json");
+        std::process::exit(0);
+    }
+
     #[cfg(debug_assertions)]
     {
         if let Some(arg) = std::env::args_os()
@@ -10,8 +19,12 @@ fn main() -> AppResult<()> {
             .map(|a| a.to_string_lossy().to_string())
             .filter(|a| a.starts_with("__"))
         {
-            if arg.as_str() == "__make_config" {
-                gptui::config::Config::write_default().unwrap();
+            match arg.as_str() {
+                "__make_config" => {
+                    gptui::config::Config::write_default().unwrap();
+                }
+
+                _ => println!("Not a recognized debug command"),
             }
 
             std::process::exit(0);
