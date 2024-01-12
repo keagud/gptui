@@ -14,7 +14,6 @@ use std::fmt::Display;
     Deserialize,
 )]
 #[repr(u8)]
-#[serde(untagged)]
 pub enum LlmModel {
     #[default]
     #[serde(rename = "gpt-4")]

@@ -17,10 +17,12 @@ syntax_theme = "base16-eighties.dark"
 # prompt.prompt: The actual prompt text.
 [[prompts]]
 label = "Assistant"
+model = "gpt-4"
 prompt = "You are a helpful assistant"
 
 [[prompts]]
 label = "Programmer"
+model = "gpt-4"
 # Triple-quote """ """ for multi-line strings in TOML
 prompt = """You are a pair programmer. Your task is to answer programming-related queries, both through natural language and example code snippets. 
 
