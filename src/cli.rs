@@ -3,10 +3,9 @@ use std::io::{self, Write};
 use crate::{
     config::{PromptSetting, CONFIG},
     session::Session,
-    tui::{AppError, AppResult},
+    tui::AppResult,
 };
-use anyhow;
-use anyhow::format_err;
+
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
 use uuid::Uuid;
@@ -128,7 +127,7 @@ pub fn run_cli() -> AppResult<()> {
                             .chain(
                                 matching_prompts
                                     .into_iter()
-                                    .map(|p| format!("\t {}", p.label())),
+                                    .map(|p| format!("\t {}", &p.label)),
                             )
                             .join("\n");
 
@@ -138,7 +137,7 @@ pub fn run_cli() -> AppResult<()> {
                         let all_prompts = CONFIG
                             .prompts()
                             .into_iter()
-                            .map(|p| format!("\t{}", p.label()))
+                            .map(|p| format!("\t{}", &p.label))
                             .sorted()
                             .join("\n");
 

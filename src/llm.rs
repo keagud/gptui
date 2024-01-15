@@ -23,34 +23,18 @@ pub enum LlmModel {
     GPT35Turbo,
 }
 
-
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Eq, PartialEq)]
 pub struct PromptSetting {
-    label: String,
-    prompt: String,
-    model: LlmModel,
-    color: Option<String>,
+    pub label: String,
+    pub prompt: String,
+    pub model: LlmModel,
+    pub color: Option<String>,
 }
 
 impl PromptSetting {
-    pub fn label(&self) -> &str {
-        self.label.as_str()
-    }
-
-    pub fn prompt(&self) -> &str {
-        self.prompt.as_str()
-    }
-
     pub fn color(&self) -> Option<&str> {
         self.color.as_deref()
     }
-
-    pub fn model(&self) -> LlmModel {
-        self.model
-   }
-
-
-
 }
 
 impl Default for PromptSetting {
@@ -83,9 +67,9 @@ impl Display for LlmModel {
     }
 }
 
-impl Into<String> for LlmModel {
-    fn into(self) -> String {
-        self.to_string()
+impl From<LlmModel> for String {
+    fn from(val: LlmModel) -> Self {
+        val.to_string()
     }
 }
 
@@ -98,7 +82,3 @@ impl LlmModel {
         }
     }
 }
-
-
-
-

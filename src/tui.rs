@@ -27,8 +27,9 @@ use crossterm::{
 };
 use uuid::Uuid;
 
+use crate::client::stream_thread_reply;
 use crate::clip;
-use crate::session::{stream_thread_reply, Message, Session, Thread};
+use crate::session::{Message, Session, Thread};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {

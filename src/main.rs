@@ -1,6 +1,6 @@
 use gptui::cli::run_cli;
 use gptui::session::Session;
-use gptui::tui::{AppError, AppResult};
+use gptui::tui::AppResult;
 
 fn main() -> AppResult<()> {
     #[cfg(feature = "debug-dump")]

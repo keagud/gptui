@@ -158,7 +158,7 @@ impl DbStore for Thread {
                     Role::from_num(
                         row.get::<usize, i64>(0)?
                             .try_into()
-                            .map_err(|e| rusqlite::Error::InvalidColumnIndex(0))?,
+                            .map_err(|_e| rusqlite::Error::InvalidColumnIndex(0))?,
                     )
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?,
                     row.get(1)?,

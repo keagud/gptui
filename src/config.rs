@@ -3,9 +3,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::PathBuf};
 
+pub use crate::llm::PromptSetting;
 use toml;
-
-use crate::llm::{LlmModel, PromptSetting};
 
 lazy_static::lazy_static! {
     static ref PROJECT_DIRS: directories::ProjectDirs =
@@ -85,14 +84,14 @@ impl Config {
     pub fn get_prompt(&self, label: &str) -> Option<&PromptSetting> {
         self.prompts
             .iter()
-            .find(|p| p.label().to_lowercase() == label.to_lowercase())
+            .find(|p| p.label.to_lowercase() == label.to_lowercase())
     }
 
     pub fn get_matching_prompts(&self, label: &str) -> Vec<&PromptSetting> {
         self.prompts()
             .into_iter()
             .filter(|p| {
-                p.label()
+                p.label
                     .to_lowercase()
                     .starts_with(label.to_lowercase().as_str())
             })
@@ -142,14 +141,14 @@ impl Config {
                 ..
             },
         ) = loaded_config.prompts.iter().find(|p| {
-            p.color()
+            p.color
                 .as_deref()
                 .is_some_and(|c| !ANSI_COLORS.contains(&c.to_lowercase().trim()))
         }) {
             let err = format_err!(
                 "Invalid color '{}' in prompt '{}': not a valid ANSI color",
                 bad_color,
-                &bad_prompt.label()
+                &bad_prompt.label
             );
 
             return Err(err);
