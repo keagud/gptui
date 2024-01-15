@@ -5,7 +5,7 @@ use std::{collections::HashSet, fs, path::PathBuf};
 
 use toml;
 
-use crate::llm::LlmModel;
+use crate::llm::{LlmModel, PromptSetting};
 
 lazy_static::lazy_static! {
     static ref PROJECT_DIRS: directories::ProjectDirs =
@@ -62,43 +62,6 @@ mod default_config {
         include_str!(concat!(env!("OUT_DIR"), "/config.toml"));
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, Eq, PartialEq)]
-pub struct PromptSetting {
-    label: String,
-    prompt: String,
-    model: LlmModel,
-    color: Option<String>,
-}
-
-impl PromptSetting {
-    pub fn label(&self) -> &str {
-        self.label.as_str()
-    }
-
-    pub fn prompt(&self) -> &str {
-        self.prompt.as_str()
-    }
-
-    pub fn color(&self) -> Option<&str> {
-        self.color.as_deref()
-    }
-
-    pub fn model(&self) -> LlmModel {
-        self.model
-   }
-}
-
-impl Default for PromptSetting {
-    fn default() -> Self {
-        Self {
-            label: "Assistant".into(),
-            prompt: "You are a helpful assistant".into(),
-            color: None,
-            model: LlmModel::default(),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     syntax_theme: String,
@@ -122,14 +85,14 @@ impl Config {
     pub fn get_prompt(&self, label: &str) -> Option<&PromptSetting> {
         self.prompts
             .iter()
-            .find(|p| p.label.to_lowercase() == label.to_lowercase())
+            .find(|p| p.label().to_lowercase() == label.to_lowercase())
     }
 
     pub fn get_matching_prompts(&self, label: &str) -> Vec<&PromptSetting> {
         self.prompts()
             .into_iter()
             .filter(|p| {
-                p.label
+                p.label()
                     .to_lowercase()
                     .starts_with(label.to_lowercase().as_str())
             })
@@ -179,14 +142,14 @@ impl Config {
                 ..
             },
         ) = loaded_config.prompts.iter().find(|p| {
-            p.color
+            p.color()
                 .as_deref()
                 .is_some_and(|c| !ANSI_COLORS.contains(&c.to_lowercase().trim()))
         }) {
             let err = format_err!(
                 "Invalid color '{}' in prompt '{}': not a valid ANSI color",
                 bad_color,
-                &bad_prompt.label
+                &bad_prompt.label()
             );
 
             return Err(err);

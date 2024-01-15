@@ -23,6 +23,46 @@ pub enum LlmModel {
     GPT35Turbo,
 }
 
+
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, Eq, PartialEq)]
+pub struct PromptSetting {
+    label: String,
+    prompt: String,
+    model: LlmModel,
+    color: Option<String>,
+}
+
+impl PromptSetting {
+    pub fn label(&self) -> &str {
+        self.label.as_str()
+    }
+
+    pub fn prompt(&self) -> &str {
+        self.prompt.as_str()
+    }
+
+    pub fn color(&self) -> Option<&str> {
+        self.color.as_deref()
+    }
+
+    pub fn model(&self) -> LlmModel {
+        self.model
+   }
+
+
+
+}
+
+impl Default for PromptSetting {
+    fn default() -> Self {
+        Self {
+            label: "Assistant".into(),
+            prompt: "You are a helpful assistant".into(),
+            color: None,
+            model: LlmModel::default(),
+        }
+    }
+}
 impl LlmModel {
     pub fn max_context(&self) -> usize {
         match self {
@@ -58,3 +98,7 @@ impl LlmModel {
         }
     }
 }
+
+
+
+
