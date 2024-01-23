@@ -7,20 +7,6 @@ use rusqlite::{params, Connection};
 
 use uuid::Uuid;
 
-#[derive(Debug, thiserror::Error)]
-pub enum DbError {
-    #[error(transparent)]
-    SqliteError(#[from] rusqlite::Error),
-
-    #[error(transparent)]
-    IOError(#[from] std::io::Error),
-
-    #[error("Error attempting to handle database value: {0}")]
-    RetrievalError(#[from] Box<dyn std::error::Error + Sync + Send>),
-}
-
-pub type DbResult<T> = Result<T, DbError>;
-
 const SCHEMA_CMD: &str = r#"
     CREATE TABLE thread(
         id VARCHAR PRIMARY KEY,
@@ -69,7 +55,7 @@ pub trait DbStore: Sized {
 }
 
 impl DbStore for Thread {
-    type Error = DbError;
+    type Error = crate::Error;
     fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error> {
         conn.execute(
             "INSERT OR IGNORE INTO thread (id, model) VALUES (?1, ?2)",
@@ -136,7 +122,7 @@ impl DbStore for Thread {
             .query_row([&id_str], |row| row.get(0))?;
 
         let model = LlmModel::from_label(&model_label).ok_or_else(|| {
-            DbError::RetrievalError(
+            crate::Error::DbRetrievalError(
                 anyhow::format_err!("{} is not a valid model", &model_label).into(),
             )
         })?;
@@ -208,7 +194,7 @@ impl DbStore for Thread {
             .map(|id| {
                 Self::from_db(
                     conn,
-                    Uuid::parse_str(&id).map_err(|e| DbError::RetrievalError(e.into()))?,
+                    Uuid::parse_str(&id).map_err(|e| crate::Error::DbRetrievalError(e.into()))?,
                 )
             })
             .collect()

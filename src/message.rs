@@ -13,8 +13,6 @@ use syntect::parsing::SyntaxReference;
 
 use itertools::Itertools;
 
-use crate::session::SessionResult;
-
 lazy_static::lazy_static! {
 
    static ref CODEBLOCK_PATTERN: regex::Regex= regex::RegexBuilder::new(r"```(?<header>\w+)?\n(?<content>.*?)\n```")
@@ -82,7 +80,7 @@ impl Role {
         }
     }
 
-    pub fn from_num(num: usize) -> SessionResult<Self> {
+    pub fn from_num(num: usize) -> crate::Result<Self> {
         match num {
             1 => Ok(Role::System),
             2 => Ok(Role::User),

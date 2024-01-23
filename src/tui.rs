@@ -1,5 +1,5 @@
-use crate::editor::{input_from_editor, ExternEditorError};
-use crate::session::{string_preview, SessionError};
+use crate::editor::input_from_editor;
+use crate::session::string_preview;
 
 use crossbeam_channel::Receiver;
 use ctrlc::set_handler;
@@ -30,33 +30,6 @@ use uuid::Uuid;
 use crate::client::stream_thread_reply;
 use crate::clip;
 use crate::session::{Message, Session, Thread};
-
-#[derive(Debug, thiserror::Error)]
-pub enum AppError {
-    #[error(transparent)]
-    SessionError(#[from] SessionError),
-
-    #[error(transparent)]
-    ChannelError(#[from] crossbeam_channel::RecvError),
-
-    #[error(transparent)]
-    IOError(#[from] std::io::Error),
-
-    #[error(transparent)]
-    ClipboardError(#[from] arboard::Error),
-
-    #[error(transparent)]
-    CliError(#[from] clap::Error),
-
-    #[error(transparent)]
-    EditorError(#[from] ExternEditorError),
-
-    #[error("An error occured: {0}")]
-    Other(#[from] Box<dyn std::error::Error + Sync + Send>),
-}
-
-pub type AppResult<T> = Result<T, AppError>;
-
 type ReplyRx = Receiver<Option<String>>;
 
 type Backend = ratatui::backend::CrosstermBackend<std::io::Stderr>;
@@ -135,19 +108,19 @@ macro_rules! app_defaults {
 macro_rules! thread_missing {
     ($opt:expr) => {
         $opt.ok_or_else(|| {
-            SessionError::Other(anyhow::format_err!("Not connected to a thread").into()).into()
+            crate::Error::Other(anyhow::format_err!("Not connected to a thread").into()).into()
         })
     };
 }
 
 impl App {
-    fn thread(&self) -> AppResult<&Thread> {
+    fn thread(&self) -> crate::Result<&Thread> {
         thread_missing! {
         self.thread_id.and_then(|id| self.session.thread_by_id(id))
         }
     }
 
-    fn thread_mut(&mut self) -> AppResult<&mut Thread> {
+    fn thread_mut(&mut self) -> crate::Result<&mut Thread> {
         thread_missing! {
             self
         .thread_id
@@ -155,14 +128,14 @@ impl App {
         }
     }
 
-    pub fn startup() -> AppResult<()> {
+    pub fn startup() -> crate::Result<()> {
         enable_raw_mode()?;
         execute!(std::io::stderr(), EnterAlternateScreen)?;
         execute!(std::io::stderr(), EnableMouseCapture)?;
         Ok(())
     }
 
-    pub fn shutdown() -> AppResult<()> {
+    pub fn shutdown() -> crate::Result<()> {
         execute!(std::io::stderr(), DisableMouseCapture)?;
         execute!(std::io::stderr(), LeaveAlternateScreen)?;
 
@@ -198,7 +171,7 @@ impl App {
     }
 
     /// 'minor mode' allowing the user to select code block text by its displayed index
-    fn update_copy_mode(&mut self, key_event: KeyEvent) -> AppResult<()> {
+    fn update_copy_mode(&mut self, key_event: KeyEvent) -> crate::Result<()> {
         match key_event.code {
             KeyCode::Esc => self.exit_copy_mode(),
             KeyCode::Enter => {
@@ -263,7 +236,7 @@ impl App {
             .clamp(0, self.max_scroll());
     }
 
-    fn update_awaiting_send(&mut self) -> AppResult<()> {
+    fn update_awaiting_send(&mut self) -> crate::Result<()> {
         let input_event = crossterm::event::read()?;
 
         // key event handling
@@ -358,7 +331,7 @@ impl App {
         self.reply_rx.is_some()
     }
 
-    fn update_recieving(&mut self) -> AppResult<()> {
+    fn update_recieving(&mut self) -> crate::Result<()> {
         self.chat_scroll = self.max_scroll();
         if let Some(rx) = self.reply_rx.as_ref() {
             {
@@ -377,7 +350,7 @@ impl App {
         Ok(())
     }
 
-    fn update(&mut self) -> AppResult<()> {
+    fn update(&mut self) -> crate::Result<()> {
         let has_key_input = crossterm::event::poll(self.tick_duration)?;
 
         match self.reply_rx {
@@ -399,7 +372,7 @@ impl App {
         Ok(())
     }
 
-    fn ui(&mut self, frame: &mut Frame) -> AppResult<()> {
+    fn ui(&mut self, frame: &mut Frame) -> crate::Result<()> {
         let h_padding = 5u16;
 
         let chunks = Layout::default()
@@ -500,17 +473,17 @@ impl App {
         Ok(())
     }
 
-    pub fn with_thread(session: Session, thread_id: Uuid) -> AppResult<Self> {
+    pub fn with_thread(session: Session, thread_id: Uuid) -> crate::Result<Self> {
         app_defaults!(session, thread_id)
     }
 
-    pub fn new(_prompt: &str) -> AppResult<Self> {
+    pub fn new(_prompt: &str) -> crate::Result<Self> {
         let session = Session::new()?;
 
         app_defaults!(session)
     }
 
-    pub fn run(&mut self) -> AppResult<()> {
+    pub fn run(&mut self) -> crate::Result<()> {
         set_handler(|| {
             App::shutdown().expect("Cleanup procedure failed");
         })
@@ -540,7 +513,7 @@ impl App {
         Ok(())
     }
 
-    fn show_editor(&mut self, terminal: &mut CrosstermTerminal) -> AppResult<()> {
+    fn show_editor(&mut self, terminal: &mut CrosstermTerminal) -> crate::Result<()> {
         terminal.clear()?;
         terminal.flush()?;
 

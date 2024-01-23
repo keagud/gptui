@@ -4,11 +4,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::process::{Command, Stdio};
 
-#[derive(Debug, thiserror::Error)]
-#[error("Error in interface with external editor: {0}")]
-pub struct ExternEditorError(#[from] std::io::Error);
-
-fn editor_binary() -> Result<String, ExternEditorError> {
+fn editor_binary() -> crate::Result<String> {
     #[cfg(target_family = "windows")]
     let editor = get_editor().map(|s| s.to_string_lossy().into())?;
 
@@ -26,8 +22,9 @@ fn editor_binary() -> Result<String, ExternEditorError> {
 /// When the editor is closed, if the file has any non-whitespace content,
 /// return Ok(Some(content)).
 /// Otherwise return Ok(None).
-pub fn input_from_editor(existing_input: &str) -> Result<Option<String>, ExternEditorError> {
+pub fn input_from_editor(existing_input: &str) -> crate::Result<Option<String>> {
     let temp_filename = uuid::Uuid::new_v4().simple().to_string();
+
     let editor = editor_binary()?;
 
     let temp_filepath = temp_dir()

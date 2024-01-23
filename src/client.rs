@@ -1,5 +1,5 @@
 use crate::config::CONFIG;
-use crate::session::{Role, SessionResult, Thread};
+use crate::session::{Role,  Thread};
 use anyhow::format_err;
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
@@ -14,7 +14,7 @@ use serde_json::{self, json};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 pub trait HttpClient: Sized {
-    fn init() -> SessionResult<Self>;
+    fn init() -> crate::Result<Self>;
 }
 
 macro_rules! build_client {
@@ -42,7 +42,7 @@ macro_rules! build_client {
 macro_rules! impl_client {
     ($struct:ident) => {
         impl HttpClient for $struct {
-            fn init() -> SessionResult<Self> {
+            fn init() -> crate::Result<Self> {
                 build_client!()
             }
         }
@@ -52,7 +52,7 @@ impl_client!(AsyncClient);
 impl_client!(BlockingClient);
 
 /// Create a reqwest::Client with the correct default authorization headers
-pub fn create_client<T>() -> SessionResult<T>
+pub fn create_client<T>() -> crate::Result<T>
 where
     T: HttpClient,
 {
@@ -87,7 +87,7 @@ impl CompletionChunk {
     }
 }
 
-fn try_parse_chunks(input: &str) -> SessionResult<(Option<Vec<CompletionChunk>>, Option<String>)> {
+fn try_parse_chunks(input: &str) -> crate::Result<(Option<Vec<CompletionChunk>>, Option<String>)> {
     let mut valid_chunks = Vec::new();
 
     let mut remainder = None;
@@ -120,7 +120,7 @@ fn try_parse_chunks(input: &str) -> SessionResult<(Option<Vec<CompletionChunk>>,
 
     Ok((return_chunks, remainder))
 }
-pub fn stream_thread_reply(thread: &Thread) -> SessionResult<Receiver<Option<String>>> {
+pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<String>>> {
     if !thread.last_message().map(|m| m.is_user()).unwrap_or(false) {
         return Err(anyhow::format_err!(
             "The most recent messege in the thread must be from a user"
@@ -183,7 +183,7 @@ pub fn stream_thread_reply(thread: &Thread) -> SessionResult<Receiver<Option<Str
     Ok(rx)
 }
 
-pub fn fetch_thread_name(thread: &Thread) -> SessionResult<String> {
+pub fn fetch_thread_name(thread: &Thread) -> crate::Result<String> {
     let client = create_client::<BlockingClient>()?;
 
     let chat_content = thread

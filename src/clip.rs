@@ -1,12 +1,10 @@
 use std::borrow::Cow;
 
-use crate::tui::AppResult;
 use arboard::Clipboard;
 
 #[cfg(target_os = "linux")]
 mod linux_no_de {
 
-    use crate::tui::AppError;
 
     use super::*;
 
@@ -20,10 +18,10 @@ mod linux_no_de {
 
     // a workaround for setups that use x11 and a window manager, but no desktop environment
     // I don't use wayland, so a PR with wayland support would be much appreciated
-    pub(super) fn select_xclip(text: &str) -> AppResult<bool> {
+    pub(super) fn select_xclip(text: &str) -> crate::Result<bool> {
         if which("xclip").is_ok() {
             let clip_file = PathBuf::from_str("/tmp")
-                .map_err(|e| AppError::Other(e.into()))?
+                .map_err(|e| crate::Error::Other(e.into()))?
                 .join(Uuid::new_v4().as_simple().to_string())
                 .with_extension("clip");
 
@@ -45,7 +43,7 @@ mod linux_no_de {
     }
 }
 
-pub fn copy<'a, T>(text: T) -> AppResult<()>
+pub fn copy<'a, T>(text: T) -> crate::Result<()>
 where
     T: Into<Cow<'a, str>>,
 {

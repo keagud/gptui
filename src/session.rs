@@ -1,6 +1,6 @@
 use crate::client::fetch_thread_name;
 use crate::config::PromptSetting;
-use crate::db::{init_db, DbError, DbStore};
+use crate::db::{init_db,  DbStore};
 use crate::llm::LlmModel;
 pub use crate::message::{CodeBlock, Message, Role};
 
@@ -20,48 +20,6 @@ use std::collections::HashMap;
 
 use std::str::FromStr;
 use uuid::Uuid;
-
-#[derive(Debug, thiserror::Error)]
-pub enum SessionError {
-    #[error(transparent)]
-    DatabaseError(#[from] DbError),
-
-    #[error("HTTP request returned status {status}")]
-    HttpError {
-        base_err: reqwest::Error,
-        status: reqwest::StatusCode,
-        message: String,
-    },
-
-    #[error("Connection error: {base_err}")]
-    ConnectionError { base_err: reqwest::Error },
-
-    #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Sync + Send>),
-}
-
-impl From<anyhow::Error> for SessionError {
-    fn from(value: anyhow::Error) -> Self {
-        Self::Other(value.into())
-    }
-}
-
-impl From<reqwest::Error> for SessionError {
-    fn from(value: reqwest::Error) -> Self {
-        if let Some(status) = value.status() {
-            let message = value.to_string();
-            Self::HttpError {
-                base_err: value,
-                status,
-                message,
-            }
-        } else {
-            Self::ConnectionError { base_err: value }
-        }
-    }
-}
-
-pub type SessionResult<T> = Result<T, SessionError>;
 
 // get an initial slice of a string, ending with elipsis,
 //desired_length is the maximum final length including elipsis.
@@ -198,7 +156,7 @@ impl Thread {
     }
 
     /// Commit the completed message to the thread, and reset state for the next incoming message
-    pub fn commit_message(&mut self) -> SessionResult<()> {
+    pub fn commit_message(&mut self) -> crate::Result<()> {
         if let Some(msg) = self.incoming.take() {
             self.messages.push(msg);
 
@@ -282,12 +240,12 @@ impl Thread {
         self.messages.iter().last()
     }
 
-    pub fn update_thread_name(&mut self) -> SessionResult<()> {
+    pub fn update_thread_name(&mut self) -> crate::Result<()> {
         self.thread_title = Some(self.fetch_thread_name()?);
         Ok(())
     }
 
-    pub fn fetch_thread_name(&self) -> SessionResult<String> {
+    pub fn fetch_thread_name(&self) -> crate::Result<String> {
         fetch_thread_name(self)
     }
 }
@@ -297,14 +255,14 @@ pub struct Session {
     db: rusqlite::Connection,
 }
 impl Session {
-    pub fn new() -> SessionResult<Self> {
+    pub fn new() -> crate::Result<Self> {
         Ok(Self {
             threads: HashMap::new(),
             db: init_db()?,
         })
     }
 
-    pub fn load_threads(&mut self) -> SessionResult<()> {
+    pub fn load_threads(&mut self) -> crate::Result<()> {
         let loaded_threads = Thread::get_all(&mut self.db)?
             .into_iter()
             .map(|t| (t.id, t))
@@ -315,7 +273,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn delete_thread(&mut self, thread_id: Uuid) -> SessionResult<bool> {
+    pub fn delete_thread(&mut self, thread_id: Uuid) -> crate::Result<bool> {
         if let Some(thread) = self.threads.remove(&thread_id) {
             thread.drop_from_db(&mut self.db)?;
             Ok(true)
@@ -326,7 +284,7 @@ impl Session {
 
     /// Create a new thread with the given prompt.
     /// Returns a unique ID that can be used to access the thread
-    pub fn new_thread(&mut self, prompt: &PromptSetting) -> SessionResult<Uuid> {
+    pub fn new_thread(&mut self, prompt: &PromptSetting) -> crate::Result<Uuid> {
         let messages = vec![Message::new(Role::System, &prompt.prompt, Utc::now())];
 
         let id = Uuid::new_v4();
@@ -369,7 +327,7 @@ impl Session {
             .count()
     }
 
-    pub fn save_to_db(&mut self) -> SessionResult<()> {
+    pub fn save_to_db(&mut self) -> crate::Result<()> {
         for thread in self.threads.values() {
             thread.to_db(&mut self.db)?;
         }

@@ -1,8 +1,7 @@
 use gptui::cli::run_cli;
 use gptui::session::Session;
-use gptui::tui::AppResult;
 
-fn main() -> AppResult<()> {
+fn main() -> gptui::Result<()> {
     #[cfg(feature = "debug-dump")]
     {
         let mut session = Session::new()?;

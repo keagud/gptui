@@ -3,7 +3,6 @@ use std::io::{self, Write};
 use crate::{
     config::{PromptSetting, CONFIG},
     session::Session,
-    tui::AppResult,
 };
 
 use clap::{Parser, Subcommand};
@@ -83,7 +82,7 @@ fn invalid_cli_value(msg: &str) -> clap::Error {
     clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
 }
 
-pub fn run_cli() -> AppResult<()> {
+pub fn run_cli() -> crate::Result<()> {
     let cli = Cli::parse();
     let mut session = Session::new()?;
     session.load_threads()?;
