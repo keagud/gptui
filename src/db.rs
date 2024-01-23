@@ -7,27 +7,29 @@ use rusqlite::{params, Connection};
 
 use uuid::Uuid;
 
-const SCHEMA_CMD: &str = r#"
-    CREATE TABLE thread(
-        id VARCHAR PRIMARY KEY,
-        model VARCHAR
-    );
+const SCHEMA_CMD: &str = include_str!(concat!(env!("OUT_DIR"), "/init.sql"));
 
-    CREATE TABLE message(
-      thread_id VARCHAR,
-      role INTEGER,
-      content VARCHAR,
-      timestamp FLOAT,
-      tokens INTEGER,
-      FOREIGN KEY (thread_id) REFERENCES thread (id)
-    );
+// const SCHEMA_CMD: &str = r#"
+//     CREATE TABLE thread(
+//         id VARCHAR PRIMARY KEY,
+//         model VARCHAR
+//     );
 
-    CREATE TABLE title(
-      id VARCHAR PRIMARY KEY,
-      content TEXT
-    );
+//     CREATE TABLE message(
+//       thread_id VARCHAR,
+//       role INTEGER,
+//       content VARCHAR,
+//       timestamp FLOAT,
+//       tokens INTEGER,
+//       FOREIGN KEY (thread_id) REFERENCES thread (id)
+//     );
 
-"#;
+//     CREATE TABLE title(
+//       id VARCHAR PRIMARY KEY,
+//       content TEXT
+//     );
+
+// "#;
 
 /// Create tables
 fn setup_table_schema(conn: &Connection) -> rusqlite::Result<()> {
