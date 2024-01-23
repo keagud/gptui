@@ -43,6 +43,8 @@ pub struct App {
     session: Session,
     thread_id: Option<uuid::Uuid>,
     reply_rx: Option<ReplyRx>,
+    summary_rx: Option<Receiver<String>>,
+    title_rx: Option<Receiver<String>>,
     user_message: String,
     tick_duration: std::time::Duration,
     chat_scroll: usize,
@@ -86,6 +88,8 @@ macro_rules! app_defaults {
             session: $session,
             thread_id: resolve_thread_id!($thread_id),
             reply_rx: Default::default(),
+            summary_rx: None,
+            title_rx: None,
             user_message: String::new(),
             chat_scroll: 0,
             text_len: 0,
@@ -236,6 +240,23 @@ impl App {
             .clamp(0, self.max_scroll());
     }
 
+    fn send_message(&mut self) -> crate::Result<()> {
+        let new_message = Message::new_user(&self.user_message);
+        self.thread_mut()?.add_message(new_message);
+
+        if self.thread()?.token_use() > 0.7 {
+            // TODO set up summarizer call
+        } else if self.thread()?.thread_title().is_none() {
+            //TODO set up title call
+        }
+
+        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
+
+        self.user_message.clear();
+
+        Ok(())
+    }
+
     fn update_awaiting_send(&mut self) -> crate::Result<()> {
         let input_event = crossterm::event::read()?;
 
@@ -276,9 +297,7 @@ impl App {
                 //submit the message with alt-enter
                 KeyCode::Enter if matches!(key_modifiers, KeyModifiers::ALT) => {
                     if !self.user_message.is_empty() {
-                        let new_message = Message::new_user(&self.user_message);
-                        self.thread_mut()?.add_message(new_message);
-
+                        self.send_message()?;
                         self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
 
                         self.user_message.clear();
@@ -351,6 +370,22 @@ impl App {
     }
 
     fn update(&mut self) -> crate::Result<()> {
+        if let Some(ref summary_rx) = self.summary_rx {
+            let () = match summary_rx.try_recv() {
+                Ok(s) => Ok::<(), crate::Error>(()),
+                Err(e) if summary_rx.is_empty() => Ok(()),
+                Err(e) => Err(e.into()),
+            }?;
+        }
+
+        if let Some(ref title_rx) = self.title_rx {
+            let _ = match title_rx.try_recv() {
+                Ok(s) => Ok::<(), crate::Error>(()),
+                Err(e) if title_rx.is_empty() => Ok(()),
+                Err(e) => Err(e.into()),
+            }?;
+        }
+
         let has_key_input = crossterm::event::poll(self.tick_duration)?;
 
         match self.reply_rx {

@@ -18,6 +18,7 @@ const SCHEMA_CMD: &str = r#"
       role INTEGER,
       content VARCHAR,
       timestamp FLOAT,
+      tokens INTEGER,
       FOREIGN KEY (thread_id) REFERENCES thread (id)
     );
 
@@ -96,7 +97,7 @@ impl DbStore for Thread {
 
         {
             let mut tx_stmt = tx.prepare(
-            r#"INSERT INTO message (thread_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)"#,
+            r#"INSERT INTO message (thread_id, role, content, timestamp, tokens) VALUES (?1, ?2, ?3, ?4)"#,
         )?;
 
             for message in messages_to_store {
@@ -105,6 +106,7 @@ impl DbStore for Thread {
                     message.role.to_num(),
                     &message.content,
                     message.timestamp_epoch(),
+                    message.token_count
                 ])?;
             }
         }
@@ -130,7 +132,7 @@ impl DbStore for Thread {
         let mut stmt = conn.prepare(
             r#"
           
-          SELECT role, content, timestamp
+          SELECT role, content, timestamp, tokens
           FROM message
           WHERE thread_id = ?1
           ORDER BY timestamp ASC
@@ -149,6 +151,7 @@ impl DbStore for Thread {
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?,
                     row.get(1)?,
                     row.get(2)?,
+                    row.get(3)?,
                 ))
             })?
             .collect::<Result<Vec<Message>, _>>()?;

@@ -1,6 +1,6 @@
 use crate::client::fetch_thread_name;
 use crate::config::PromptSetting;
-use crate::db::{init_db,  DbStore};
+use crate::db::{init_db, DbStore};
 use crate::llm::LlmModel;
 pub use crate::message::{CodeBlock, Message, Role};
 
@@ -62,6 +62,23 @@ impl Thread {
 
     pub fn thread_title(&self) -> Option<&str> {
         self.thread_title.as_ref().map(|s| s.as_ref())
+    }
+
+    /// get the total tokens used for this thread.
+    /// Token counts are accurate for LLM messages, but user messages
+    /// are a rough guesstimate
+    pub fn total_tokens(&self) -> usize {
+        self.messages
+            .iter()
+            .map(|m| m.token_count.unwrap_or(m.content.len() / 4))
+            .sum()
+    }
+
+    pub fn token_use(&self) -> f64 {
+        let max_context = self.prompt().model.max_context() as f64;
+        let tokens_used = self.total_tokens() as f64;
+
+        tokens_used / max_context
     }
 
     pub fn display_title(&self) -> String {

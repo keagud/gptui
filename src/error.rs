@@ -26,7 +26,7 @@ pub enum Error {
     SendError(#[from] crossbeam_channel::SendError<String>),
 
     #[error(transparent)]
-    ReceiveError(#[from] crossbeam_channel::RecvError),
+    ReceiveError(ChannelRecvError),
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),
@@ -39,6 +39,27 @@ pub enum Error {
 
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Sync + Send>),
+}
+
+impl From<crossbeam_channel::TryRecvError> for Error {
+    fn from(value: crossbeam_channel::TryRecvError) -> Self {
+        Self::ReceiveError(ChannelRecvError::TryRecvError(value))
+    }
+}
+
+impl From<crossbeam_channel::RecvError> for Error {
+    fn from(value: crossbeam_channel::RecvError) -> Self {
+        Self::ReceiveError(ChannelRecvError::RecvError(value))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ChannelRecvError {
+    #[error(transparent)]
+    TryRecvError(crossbeam_channel::TryRecvError),
+
+    #[error(transparent)]
+    RecvError(crossbeam_channel::RecvError),
 }
 
 #[allow(unused)]
@@ -65,6 +86,7 @@ macro_rules! other_err {
 
 #[allow(unused)]
 pub(crate) use other_err;
+use strum_macros::Display;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
