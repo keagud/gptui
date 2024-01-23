@@ -1,7 +1,8 @@
 use crate::config::CONFIG;
 use crate::llm::LlmModel;
-use crate::session::{Message, Role, Thread};
+use crate::session::{Message, Role, Summary, Thread};
 
+use itertools::Itertools;
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection};
 
@@ -51,7 +52,8 @@ pub fn init_db() -> anyhow::Result<Connection> {
 
 pub trait DbStore: Sized {
     type Error;
-    fn from_db(conn: &Connection, id: Uuid) -> Result<Self, Self::Error>;
+    type Key: Sized;
+    fn from_db(conn: &Connection, id: Self::Key) -> Result<Self, Self::Error>;
     fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error>;
     fn get_all(conn: &mut Connection) -> Result<Vec<Self>, Self::Error>;
     fn drop_from_db(&self, conn: &mut Connection) -> Result<bool, Self::Error>;
@@ -59,6 +61,7 @@ pub trait DbStore: Sized {
 
 impl DbStore for Thread {
     type Error = crate::Error;
+    type Key = Uuid;
     fn to_db(&self, conn: &mut Connection) -> Result<(), Self::Error> {
         conn.execute(
             "INSERT OR IGNORE INTO thread (id, model) VALUES (?1, ?2)",
@@ -98,12 +101,12 @@ impl DbStore for Thread {
         let tx = conn.transaction()?;
 
         {
-            let mut tx_stmt = tx.prepare(
-            r#"INSERT INTO message (thread_id, role, content, timestamp, tokens) VALUES (?1, ?2, ?3, ?4)"#,
+            let mut msg_update = tx.prepare(
+            r#"INSERT INTO message (thread_id, role, content, timestamp, tokens) VALUES (?1, ?2, ?3, ?4, ?5)"#,
         )?;
 
             for message in messages_to_store {
-                tx_stmt.execute(params![
+                msg_update.execute(params![
                     &self.str_id(),
                     message.role.to_num(),
                     &message.content,
@@ -113,12 +116,25 @@ impl DbStore for Thread {
             }
         }
 
+        {
+            let mut summary_update = tx.prepare(r#"INSERT OR IGNORE INTO summary (thread_id, start_index, end_index, content) VALUES (?1, ?2, ?3, ?4)"#)?;
+
+            for summary in self.summary_entries.iter() {
+                summary_update.execute(params![
+                    &self.str_id(),
+                    summary.start_index,
+                    summary.end_index,
+                    &summary.content
+                ])?;
+            }
+        }
+
         tx.commit()?;
 
         Ok(())
     }
 
-    fn from_db(conn: &Connection, id: Uuid) -> Result<Self, Self::Error> {
+    fn from_db(conn: &Connection, id: Self::Key) -> Result<Self, Self::Error> {
         let id_str = id.as_simple().to_string();
 
         let model_label: String = conn
@@ -163,7 +179,25 @@ impl DbStore for Thread {
             .query_row([&id_str], |row| row.get::<_, String>(0))
             .optional()?;
 
+        // load any stored summary data
+        let summaries = conn
+            .prepare(
+                r#" SELECT start_index, end_index, content FROM summary
+              WHERE thread_id = ?1 "#,
+            )?
+            .query_and_then(params![&id_str], |row| -> rusqlite::Result<Summary> {
+                Ok(Summary::new(
+                    id,
+                    row.get::<usize, usize>(0)?,
+                    row.get::<usize, usize>(1)?,
+                    &row.get::<usize, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
         let mut new_thread = Thread::new(messages, model, id);
+
+        new_thread.summary_entries = summaries;
 
         if let Some(ref title) = title {
             new_thread.set_title(title);
@@ -179,6 +213,10 @@ impl DbStore for Thread {
 
         //clear stored title if it exists
         conn.prepare("DELETE FROM title WHERE id = ?1")?
+            .execute(params![&self.str_id()])?;
+
+        // clear associated summary data
+        conn.prepare("DELETE FROM summary WHERE thread_id = 1?")?
             .execute(params![&self.str_id()])?;
 
         // delete the thread itself

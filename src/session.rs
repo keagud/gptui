@@ -36,12 +36,15 @@ pub fn string_preview(text: &str, desired_length: usize) -> Cow<'_, str> {
             .join(""),
     )
 }
+
 #[derive(Debug, Default, Clone)]
 pub struct Thread {
     messages: Vec<Message>,
     pub model: LlmModel,
 
     pub id: Uuid,
+
+    pub summary_entries: Vec<Summary>,
 
     prompt: PromptSetting,
 
@@ -224,11 +227,46 @@ impl Thread {
         self.id.as_simple().to_string()
     }
 
+    //TODO test this
+    /// Get this thread's messages with any summary edits applied
+    pub fn minified_messages(&self) -> Vec<Message> {
+        if self.summary_entries.is_empty() {
+            return self.messages.iter().cloned().collect();
+        }
+
+        // get only the entries that are not contained in the
+        // range of another summary
+        let max_coverage_summaries = self
+            .summary_entries
+            .iter()
+            .sorted_by_key(|s| s.start_index)
+            .group_by(|s| s.start_index)
+            .into_iter()
+            .filter_map(|(_, g)| g.max_by_key(|x| x.end_index))
+            .collect_vec();
+
+        let mut i = 0usize;
+        let mut amended_messages = Vec::new();
+
+        for s in max_coverage_summaries.iter() {
+            amended_messages.extend_from_slice(&self.messages[i..s.start_index]);
+
+            let summary_timestamp = self.messages[s.end_index.saturating_sub(1)].timestamp;
+
+            amended_messages.push(s.as_message(summary_timestamp));
+
+            i = s.end_index;
+        }
+
+        amended_messages.extend_from_slice(&self.messages[i..]);
+        amended_messages
+    }
+
     /// Format this thread as JSON suitible for use with the HTTP API
     pub fn as_json_body(&self) -> Value {
         json!({
             "model" : self.model.to_string(),
-            "messages" : self.messages
+            "messages" : self.minified_messages()
                 .iter()
                 .map(|m| serde_json::to_value(m).unwrap())
                 .collect::<Vec<Value>>(),
@@ -365,6 +403,30 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.save_to_db().unwrap();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Summary {
+    _thread_id: Uuid,
+    pub start_index: usize,
+    pub end_index: usize,
+    pub content: String,
+}
+
+impl Summary {
+    pub fn new(thread_id: Uuid, start_index: usize, end_index: usize, content: &str) -> Self {
+        Summary {
+            _thread_id : thread_id,
+            start_index,
+            end_index,
+            content: content.into(),
+        }
+    }
+
+    pub fn as_message(&self, timestamp: DateTime<Utc>) -> Message {
+        let msg_content = format!("**Summary of elided messages:**: \n {}", &self.content);
+        Message::new(Role::System, &msg_content, timestamp)
     }
 }
 

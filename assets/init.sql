@@ -9,11 +9,13 @@ CREATE TABLE message(
   content VARCHAR,
   timestamp FLOAT,
   tokens INTEGER,
-  FOREIGN KEY (thread_id) REFERENCES thread (id)
+  FOREIGN KEY (thread_id) REFERENCES thread (id),
+  PRIMARY KEY(thread_id, timestamp)
 );
 
 CREATE TABLE title(
   id VARCHAR PRIMARY KEY,
+  FOREIGN KEY (id) REFERENCES thread(id),
   content TEXT
 );
 
@@ -23,5 +25,6 @@ CREATE TABLE summary(
   start_index INTEGER,
   end_index INTEGER,
   content TEXT,
-  FOREIGN KEY (thread_id) REFERENCES thread(id)
+  FOREIGN KEY (thread_id) REFERENCES thread(id),
+  PRIMARY KEY (thread_id, start_index, end_index)
 );
