@@ -15,8 +15,8 @@ CREATE TABLE message(
 
 CREATE TABLE title(
   id VARCHAR PRIMARY KEY,
-  FOREIGN KEY (id) REFERENCES thread(id),
-  content TEXT
+  content TEXT,
+  FOREIGN KEY (id) REFERENCES thread(id)
 );
 
 

@@ -12,6 +12,9 @@ const SCHEMA_CMD: &str = include_str!(concat!(env!("OUT_DIR"), "/init.sql"));
 
 /// Create tables
 fn setup_table_schema(conn: &Connection) -> rusqlite::Result<()> {
+
+    eprintln!("{}", SCHEMA_CMD);
+
     conn.execute_batch(SCHEMA_CMD)
 }
 
