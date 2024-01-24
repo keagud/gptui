@@ -136,6 +136,7 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
     let client = create_client::<AsyncClient>()?;
 
     let (tx, rx) = bounded(100);
+    let _tx = tx.clone();
 
     let thread_json = thread.as_json_body();
 
@@ -145,8 +146,7 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
             .build()
             .expect("Async runtime failed to start");
 
-        let _tx = tx.clone();
-        let res: anyhow::Result<()> = rt.block_on(async move {
+        let _: anyhow::Result<()> = rt.block_on(async move {
             let response = client.post(OPENAI_URL).json(&thread_json).send().await?;
 
             let mut stream = response
@@ -170,17 +170,16 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
                 if let Some(chunks) = parsed {
                     for chunk in chunks.iter() {
                         if let Some(s) = chunk.token() {
-                            _tx.send(Some(s))?;
+                            let _ = _tx.send(Some(s));
                         }
                     }
                 }
             }
 
-            _tx.send(None).unwrap();
+            let _ = _tx.send(None);
 
             Ok(())
         });
-        res.expect("Failed to spawn thread");
     });
 
     Ok(rx)

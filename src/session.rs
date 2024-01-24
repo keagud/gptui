@@ -315,7 +315,7 @@ impl Thread {
         let prompt = r"
         Your task is to provide brief descriptive titles to message threads. 
         Each title should be no more than 100 characters in length.
-        Your response should consist of the title and nothing else.";
+        Your response should consist of the title and nothing else. Do not use quotes in your response.";
 
         let body = json!({
         "model" : "gpt-3.5-turbo",
