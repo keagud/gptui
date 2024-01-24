@@ -30,8 +30,7 @@ lazy_static::lazy_static! {
 
 const DEFAULT_THEME: &str = "base16-eighties.dark";
 
-#[allow(unused)]
-fn timestamp() -> f64 {
+pub fn timestamp() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time moves forward")
@@ -144,6 +143,12 @@ impl Message {
     }
 
     pub fn update(&mut self, text: &str) {
+        if let Some(t) = self.token_count {
+            self.token_count = Some(t + 1)
+        } else {
+            self.token_count = Some(1)
+        }
+
         self.content.push_str(text);
         self.update_blocks();
     }

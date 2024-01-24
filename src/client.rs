@@ -1,6 +1,9 @@
 use crate::config::CONFIG;
-use crate::session::{Role,  Thread};
-use anyhow::format_err;
+
+use crate::error::other_err;
+
+use crate::session::Thread;
+
 use crossbeam_channel::bounded;
 use crossbeam_channel::Receiver;
 use futures::StreamExt;
@@ -10,7 +13,7 @@ use reqwest::blocking::Client as BlockingClient;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest::Client as AsyncClient;
 use serde::{Deserialize, Serialize};
-use serde_json::{self, json};
+use serde_json::{self};
 
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 pub trait HttpClient: Sized {
@@ -128,6 +131,8 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
         .into());
     }
 
+    let _thread_id = thread.str_id();
+
     let client = create_client::<AsyncClient>()?;
 
     let (tx, rx) = bounded(100);
@@ -140,6 +145,7 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
             .build()
             .expect("Async runtime failed to start");
 
+        let _tx = tx.clone();
         let res: anyhow::Result<()> = rt.block_on(async move {
             let response = client.post(OPENAI_URL).json(&thread_json).send().await?;
 
@@ -149,8 +155,6 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
                 .map_err(|e| anyhow::anyhow!(e));
 
             let mut buf = String::new();
-
-            let _message_tokens = String::new();
 
             while let Some(bytes_result) = stream.next().await {
                 buf.push_str(String::from_utf8_lossy(&bytes_result?).as_ref());
@@ -166,67 +170,48 @@ pub fn stream_thread_reply(thread: &Thread) -> crate::Result<Receiver<Option<Str
                 if let Some(chunks) = parsed {
                     for chunk in chunks.iter() {
                         if let Some(s) = chunk.token() {
-                            tx.send(Some(s))?;
+                            _tx.send(Some(s))?;
                         }
                     }
                 }
             }
 
-            tx.send(None)?;
+            _tx.send(None).unwrap();
 
             Ok(())
         });
-
         res.expect("Failed to spawn thread");
     });
 
     Ok(rx)
 }
 
-pub fn fetch_thread_name(thread: &Thread) -> crate::Result<String> {
-    let client = create_client::<BlockingClient>()?;
+/// Submit a request to the API on a new thread
+pub fn spawn_client(json_body: serde_json::Value) -> crate::Result<Receiver<String>> {
+    let (tx, rx) = crossbeam_channel::bounded::<String>(1);
 
-    let chat_content = thread
-        .messages()
-        .iter()
-        .filter(|m| !m.is_system())
-        .map(|m| {
-            let msg_label = match m.role {
-                Role::Assistant => "Assistant",
-                Role::User => "User",
-                _ => unreachable!(),
-            };
+    let client: BlockingClient = create_client()?;
 
-            format!("{}:\n{}\n", msg_label, &m.content)
-        })
-        .join("\n");
+    std::thread::spawn(move || {
+        let response: serde_json::Value = client
+            .post(OPENAI_URL)
+            .json(&json_body)
+            .send()
+            .unwrap()
+            .json()
+            .unwrap();
 
-    let prompt = r"
-        Your task is to provide brief descriptive titles to message threads. 
-        Each title should be no more than 100 characters in length.
-        Your response should consist of the title and nothing else.";
+        let response_content = response
+            .pointer("/choices/0/message/content")
+            .and_then(|s| s.as_str())
+            .ok_or(other_err!("Could not parse JSON response"))
+            .unwrap()
+            .to_string();
 
-    let body = json!({
-    "model" : "gpt-3.5-turbo",
-    "messages": [
-        {
-        "role" : "system",
-        "content" : prompt
-        },
-        {
-            "role" : "user",
-            "content" : &chat_content
-        }]
+        tx.send(response_content).unwrap();
     });
 
-    let response: serde_json::Value = client.post(OPENAI_URL).json(&body).send()?.json()?;
-
-    let title = response
-        .pointer("/choices/0/message/content")
-        .and_then(|s| s.as_str())
-        .ok_or(format_err!("Could not parse JSON response"))?;
-
-    Ok(title.into())
+    Ok(rx)
 }
 
 #[cfg(test)]

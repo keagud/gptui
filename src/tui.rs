@@ -1,5 +1,5 @@
-use crate::editor::input_from_editor;
 use crate::session::string_preview;
+use crate::{editor::input_from_editor, session::Summary};
 
 use crossbeam_channel::Receiver;
 use ctrlc::set_handler;
@@ -41,9 +41,9 @@ const SCROLL_STEP: usize = 1;
 pub struct App {
     should_quit: bool,
     session: Session,
-    thread_id: Option<uuid::Uuid>,
-    reply_rx: Option<ReplyRx>,
-    summary_rx: Option<Receiver<String>>,
+    thread_id: uuid::Uuid,
+    reply_rx: Option<Receiver<Option<String>>>,
+    summary_rx: Option<Receiver<Summary>>,
     title_rx: Option<Receiver<String>>,
     user_message: String,
     tick_duration: std::time::Duration,
@@ -56,20 +56,7 @@ pub struct App {
     text_len: usize,
     chat_window_height: u16,
     should_show_editor: bool,
-}
-
-macro_rules! resolve_thread_id {
-    (Some($thread_id:expr)) => {
-        Some($thread_id)
-    };
-
-    (None) => {
-        None
-    };
-
-    ($thread_id:expr) => {
-        Some($thread_id)
-    };
+    token_count: usize,
 }
 
 macro_rules! app_defaults {
@@ -86,7 +73,7 @@ macro_rules! app_defaults {
         Ok(Self {
             should_quit: false,
             session: $session,
-            thread_id: resolve_thread_id!($thread_id),
+            thread_id: $thread_id,
             reply_rx: Default::default(),
             summary_rx: None,
             title_rx: None,
@@ -101,6 +88,7 @@ macro_rules! app_defaults {
             content_line_width: 0,
             should_show_editor: false,
             chat_window_height: 0,
+            token_count: 0,
         })
     }};
 
@@ -109,27 +97,17 @@ macro_rules! app_defaults {
     }};
 }
 
-macro_rules! thread_missing {
-    ($opt:expr) => {
-        $opt.ok_or_else(|| {
-            crate::Error::Other(anyhow::format_err!("Not connected to a thread").into()).into()
-        })
-    };
-}
-
 impl App {
-    fn thread(&self) -> crate::Result<&Thread> {
-        thread_missing! {
-        self.thread_id.and_then(|id| self.session.thread_by_id(id))
-        }
+    fn thread(&self) -> &Thread {
+        self.session
+            .thread_by_id(self.thread_id)
+            .expect("Could not load active thread")
     }
 
-    fn thread_mut(&mut self) -> crate::Result<&mut Thread> {
-        thread_missing! {
-            self
-        .thread_id
-        .and_then(|id| self.session.thread_by_id_mut(id))
-        }
+    fn thread_mut(&mut self) -> &mut Thread {
+        self.session
+            .thread_by_id_mut(self.thread_id)
+            .expect("Could not load active thread")
     }
 
     pub fn startup() -> crate::Result<()> {
@@ -180,7 +158,7 @@ impl App {
             KeyCode::Esc => self.exit_copy_mode(),
             KeyCode::Enter => {
                 if let Some(index) = self.selected_block_index {
-                    match self.thread()?.code_blocks().get(index.saturating_sub(1)) {
+                    match self.thread().code_blocks().get(index.saturating_sub(1)) {
                         None => {
                             self.bottom_text = Some(format!("No selection for '{}'!", index));
                             self.exit_copy_mode();
@@ -201,7 +179,7 @@ impl App {
                 match self.copy_select_buf.parse::<usize>() {
                     Ok(n)
                         if self
-                            .thread()?
+                            .thread()
                             .code_blocks()
                             .get(n.saturating_sub(1))
                             .is_some() =>
@@ -242,15 +220,21 @@ impl App {
 
     fn send_message(&mut self) -> crate::Result<()> {
         let new_message = Message::new_user(&self.user_message);
-        self.thread_mut()?.add_message(new_message);
+        self.thread_mut().add_message(new_message);
 
-        if self.thread()?.token_use() > 0.7 {
-            // TODO set up summarizer call
-        } else if self.thread()?.thread_title().is_none() {
-            //TODO set up title call
+        // at most 2 listening threads at a time
+        // one to stream the tokens, one for meta tasks
+        // if we're nearing the token max, request a summary to bring down the context size
+        if self.thread().token_use() > 0.7 {
+            let summary_rx = self.thread_mut().fetch_summary()?;
+            self.summary_rx = Some(summary_rx);
+            // if there's still tokens to spare and no title, request a thread title
+        } else if self.thread().thread_title().is_none() {
+            let title_rx = self.thread_mut().fetch_thread_name()?;
+            self.title_rx = Some(title_rx);
         }
 
-        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
+        self.reply_rx = Some(stream_thread_reply(self.thread())?);
 
         self.user_message.clear();
 
@@ -298,7 +282,7 @@ impl App {
                 KeyCode::Enter if matches!(key_modifiers, KeyModifiers::ALT) => {
                     if !self.user_message.is_empty() {
                         self.send_message()?;
-                        self.reply_rx = Some(stream_thread_reply(self.thread()?)?);
+                        self.reply_rx = Some(stream_thread_reply(self.thread())?);
 
                         self.user_message.clear();
                     }
@@ -356,10 +340,10 @@ impl App {
             {
                 match rx.recv()? {
                     Some(s) => {
-                        self.thread_mut()?.update(&s);
+                        self.thread_mut().update(&s);
                     }
                     None => {
-                        self.thread_mut()?.commit_message()?;
+                        self.thread_mut().commit_message()?;
                         self.reply_rx = None;
                     }
                 }
@@ -371,17 +355,26 @@ impl App {
 
     fn update(&mut self) -> crate::Result<()> {
         if let Some(ref summary_rx) = self.summary_rx {
-            let () = match summary_rx.try_recv() {
-                Ok(s) => Ok::<(), crate::Error>(()),
-                Err(e) if summary_rx.is_empty() => Ok(()),
+            match summary_rx.try_recv() {
+                Ok(s) => {
+                    self.thread_mut().add_summary(s);
+                    self.summary_rx = None;
+
+                    Ok::<(), crate::Error>(())
+                }
+                Err(_) if summary_rx.is_empty() => Ok(()),
                 Err(e) => Err(e.into()),
             }?;
         }
 
         if let Some(ref title_rx) = self.title_rx {
-            let _ = match title_rx.try_recv() {
-                Ok(s) => Ok::<(), crate::Error>(()),
-                Err(e) if title_rx.is_empty() => Ok(()),
+            match title_rx.try_recv() {
+                Ok(s) => {
+                    self.thread_mut().set_title(&s);
+                    self.title_rx = None;
+                    Ok::<(), crate::Error>(())
+                }
+                Err(_) if title_rx.is_empty() => Ok(()),
                 Err(e) => Err(e.into()),
             }?;
         }
@@ -419,7 +412,7 @@ impl App {
         self.content_line_width = chunks[0].width - (h_padding * 2) - 2;
 
         let msgs_formatted = self
-            .thread()?
+            .thread()
             .tui_formatted_messages(self.content_line_width);
 
         let msg_lines = msgs_formatted
@@ -445,7 +438,7 @@ impl App {
 
         let scroll_percent = (self.chat_scroll as f64 / self.max_scroll() as f64) * 100.0;
 
-        let chat_title = self.thread()?.display_title();
+        let chat_title = self.thread().display_title();
 
         let status_message: Title<'_> = if self.is_recieving() {
             Span::from("[Please Wait]").red().bold().into()
@@ -508,14 +501,8 @@ impl App {
         Ok(())
     }
 
-    pub fn with_thread(session: Session, thread_id: Uuid) -> crate::Result<Self> {
+    pub fn new(session: Session, thread_id: Uuid) -> crate::Result<Self> {
         app_defaults!(session, thread_id)
-    }
-
-    pub fn new(_prompt: &str) -> crate::Result<Self> {
-        let session = Session::new()?;
-
-        app_defaults!(session)
     }
 
     pub fn run(&mut self) -> crate::Result<()> {

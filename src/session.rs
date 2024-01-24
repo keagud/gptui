@@ -1,4 +1,4 @@
-use crate::client::fetch_thread_name;
+use crate::client::spawn_client;
 use crate::config::PromptSetting;
 use crate::db::{init_db, DbStore};
 use crate::llm::LlmModel;
@@ -7,6 +7,7 @@ pub use crate::message::{CodeBlock, Message, Role};
 // use anyhow::format_err;
 use chrono::{DateTime, Utc};
 
+use crossbeam_channel::Receiver;
 use itertools::Itertools;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -97,6 +98,10 @@ impl Thread {
         self.thread_title = Some(title.into())
     }
 
+    pub fn add_summary(&mut self, _summary: Summary) {
+        todo!();
+    }
+
     pub fn list_preview(&self) -> Option<String> {
         let local_time_fmt = self
             .init_time()?
@@ -164,7 +169,7 @@ impl Thread {
         self.incoming = Some(Message::new_asst(text));
     }
 
-    /// Add token(s) to the incoming message in progress
+    /// Add a token to the incoming message in progress
     pub fn update(&mut self, incoming_text: &str) {
         if self.incoming.is_some() {
             if let Some(m) = self.incoming.as_mut() {
@@ -179,10 +184,6 @@ impl Thread {
     pub fn commit_message(&mut self) -> crate::Result<()> {
         if let Some(msg) = self.incoming.take() {
             self.messages.push(msg);
-
-            if self.thread_title().is_none() && self.non_sys_messages().len() >= 2 {
-                self.update_thread_name()?;
-            }
         }
 
         Ok(())
@@ -231,7 +232,7 @@ impl Thread {
     /// Get this thread's messages with any summary edits applied
     pub fn minified_messages(&self) -> Vec<Message> {
         if self.summary_entries.is_empty() {
-            return self.messages.iter().cloned().collect();
+            return self.messages.to_vec();
         }
 
         // get only the entries that are not contained in the
@@ -295,13 +296,45 @@ impl Thread {
         self.messages.iter().last()
     }
 
-    pub fn update_thread_name(&mut self) -> crate::Result<()> {
-        self.thread_title = Some(self.fetch_thread_name()?);
-        Ok(())
+    pub fn fetch_thread_name(&self) -> crate::Result<Receiver<String>> {
+        let chat_content = self
+            .messages()
+            .iter()
+            .filter(|m| !m.is_system())
+            .map(|m| {
+                let msg_label = match m.role {
+                    Role::Assistant => "Assistant",
+                    Role::User => "User",
+                    _ => unreachable!(),
+                };
+
+                format!("{}:\n{}\n", msg_label, &m.content)
+            })
+            .join("\n");
+
+        let prompt = r"
+        Your task is to provide brief descriptive titles to message threads. 
+        Each title should be no more than 100 characters in length.
+        Your response should consist of the title and nothing else.";
+
+        let body = json!({
+        "model" : "gpt-3.5-turbo",
+        "messages": [
+            {
+            "role" : "system",
+            "content" : prompt
+            },
+            {
+                "role" : "user",
+                "content" : &chat_content
+            }]
+        });
+
+        spawn_client(body)
     }
 
-    pub fn fetch_thread_name(&self) -> crate::Result<String> {
-        fetch_thread_name(self)
+    pub fn fetch_summary(&self) -> crate::Result<Receiver<Summary>> {
+        todo!();
     }
 }
 /// Struct holding state for multiple chat sessions
@@ -417,7 +450,7 @@ pub struct Summary {
 impl Summary {
     pub fn new(thread_id: Uuid, start_index: usize, end_index: usize, content: &str) -> Self {
         Summary {
-            _thread_id : thread_id,
+            _thread_id: thread_id,
             start_index,
             end_index,
             content: content.into(),

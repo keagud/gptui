@@ -86,7 +86,6 @@ macro_rules! other_err {
 
 #[allow(unused)]
 pub(crate) use other_err;
-use strum_macros::Display;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 

@@ -107,7 +107,7 @@ pub fn run_cli() -> crate::Result<()> {
 
         Commands::Resume { index } => {
             let thread_id = thread_by_index(&session, *index).expect("Failed to fetch thread");
-            let mut app = App::with_thread(session, thread_id)?;
+            let mut app = App::new(session, thread_id)?;
             app.run()?;
         }
         Commands::New { prompt } => {
@@ -153,7 +153,7 @@ pub fn run_cli() -> crate::Result<()> {
 
             let new_thread_id = session.new_thread(&prompt)?;
 
-            let mut app = App::with_thread(session, new_thread_id)?;
+            let mut app = App::new(session, new_thread_id)?;
             app.run()?;
         }
 
