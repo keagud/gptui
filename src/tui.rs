@@ -229,7 +229,9 @@ impl App {
             let summary_rx = self.thread_mut().fetch_summary()?;
             self.summary_rx = Some(summary_rx);
             // if there's still tokens to spare and no title, request a thread title
-        } else if self.thread().thread_title().is_none() {
+        } else if self.thread().thread_title().is_none()
+            && self.thread().non_sys_messages().len() >= 2
+        {
             let title_rx = self.thread_mut().fetch_thread_name()?;
             self.title_rx = Some(title_rx);
         }
