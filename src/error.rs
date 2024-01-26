@@ -37,6 +37,9 @@ pub enum Error {
     #[error(transparent)]
     CliError(#[from] clap::Error),
 
+    #[error("Error when communicating with daemon: {0}")]
+    CommunicationError(Box<dyn std::error::Error + Sync + Send>),
+
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Sync + Send>),
 }

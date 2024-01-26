@@ -56,6 +56,7 @@ pub struct App {
     text_len: usize,
     chat_window_height: u16,
     should_show_editor: bool,
+    chat_title: Option<String>,
     token_count: usize,
 }
 
@@ -89,6 +90,7 @@ macro_rules! app_defaults {
             should_show_editor: false,
             chat_window_height: 0,
             token_count: 0,
+            chat_title: None,
         })
     }};
 
@@ -373,6 +375,7 @@ impl App {
             match title_rx.try_recv() {
                 Ok(s) => {
                     self.thread_mut().set_title(&s);
+                    self.chat_title = Some(s);
                     self.title_rx = None;
                     Ok::<(), crate::Error>(())
                 }
@@ -438,9 +441,17 @@ impl App {
             Style::new().blue()
         };
 
-        let scroll_percent = (self.chat_scroll as f64 / self.max_scroll() as f64) * 100.0;
+        let mut scroll_percent = (self.chat_scroll as f64 / self.max_scroll() as f64) * 100.0;
 
-        let chat_title = self.thread().display_title();
+        if scroll_percent.is_nan() {
+            scroll_percent = 100.0;
+        }
+
+        let chat_title = if let Some(ref title) = self.chat_title {
+            string_preview(title, self.content_line_width.saturating_sub(2).into())
+        } else {
+            "...".into()
+        };
 
         let status_message: Title<'_> = if self.is_recieving() {
             Span::from("[Please Wait]").red().bold().into()
@@ -475,7 +486,7 @@ impl App {
             .title(
                 status_message
                     .position(Position::Bottom)
-                    .alignment(Alignment::Left),
+                    .alignment(Alignment::Right),
             );
 
         let alert_msg = self

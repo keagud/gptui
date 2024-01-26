@@ -1,6 +1,9 @@
 use gptui::cli::run_cli;
 use gptui::session::Session;
 
+use gptui::relay;
+use itertools::Itertools;
+
 fn main() -> gptui::Result<()> {
     #[cfg(feature = "debug-dump")]
     {
@@ -11,32 +14,31 @@ fn main() -> gptui::Result<()> {
         std::process::exit(0);
     }
 
-    #[cfg(debug_assertions)]
+    let args = std::env::args_os().collect_vec();
+    if let Some(arg) = args
+        .get(1)
+        .map(|a| a.to_string_lossy().to_string())
+        .filter(|a| a.starts_with("__"))
     {
-        if let Some(arg) = std::env::args_os()
-            .nth(1)
-            .map(|a| a.to_string_lossy().to_string())
-            .filter(|a| a.starts_with("__"))
-        {
-            match arg.as_str() {
-                "__make_config" => {
-                    gptui::config::Config::write_default().unwrap();
-                }
-
-                _ => println!("Not a recognized debug command"),
+        match arg.as_str() {
+            "__make_config" => {
+                gptui::config::Config::write_default().unwrap();
+                std::process::exit(0);
             }
 
-            std::process::exit(0);
-        }
-    }
+            "__relay" => {
+                let port = args
+                    .get(2)
+                    .expect("Port argument is required")
+                    .to_str()
+                    .expect("Invalid port argument")
+                    .to_string();
 
-    if std::env::var("TEST").is_ok_and(|v| v == "1") {
-        let mut session = Session::new()?;
-        session.load_threads()?;
-        let ordered = session.ordered_threads();
-        let (_, thread) = ordered.last().unwrap();
-        let title = thread.fetch_thread_name()?;
-        dbg!(&title);
+                return relay::run(&port);
+            }
+
+            _ => panic!("Not a valid command: {arg}"),
+        }
     } else {
         run_cli()?;
     }

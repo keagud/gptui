@@ -9,6 +9,7 @@ pub mod llm;
 pub mod message;
 pub mod session;
 pub mod tui;
+pub mod relay;
 
 pub use error::Error;
 pub use error::Result;
